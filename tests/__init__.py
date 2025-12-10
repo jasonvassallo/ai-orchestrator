@@ -7,7 +7,7 @@ Run all tests:
 
 Run with coverage:
     pytest tests/ --cov=src --cov-report=html
-    
+
 Security note: These tests use mocked API calls and
 do not require real API keys.
 """

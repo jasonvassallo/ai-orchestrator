@@ -19,23 +19,18 @@ Security Features:
 - Audit trail for all API calls
 """
 
-import os
-import re
-import json
 import asyncio
 import logging
-import hashlib
+import re
 import time
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional, Tuple, Union
+from abc import ABC, abstractmethod
+from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from functools import wraps
-from collections import deque
-from abc import ABC, abstractmethod
+from typing import Any
 
 # Import our secure credential manager
-from .credentials import get_api_key, get_credential_manager
+from .credentials import get_api_key
 
 # Configure logging with security in mind (no sensitive data in logs)
 logger = logging.getLogger(__name__)
@@ -64,11 +59,11 @@ class ModelCapability:
     name: str
     provider: str
     model_id: str
-    task_types: Tuple[TaskType, ...]
+    task_types: tuple[TaskType, ...]
     context_window: int
     cost_per_1k_input: float
     cost_per_1k_output: float
-    strengths: Tuple[str, ...]
+    strengths: tuple[str, ...]
     max_output_tokens: int = 4096
     supports_streaming: bool = True
     supports_functions: bool = False
@@ -90,16 +85,16 @@ class APIResponse:
     content: str
     model: str
     provider: str
-    usage: Dict[str, int]
+    usage: dict[str, int]
     latency_ms: float
     success: bool
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class InputValidator:
     """Security-focused input validation"""
-    
+
     # Patterns that might indicate injection attempts
     SUSPICIOUS_PATTERNS = [
         r"<\s*script\b",  # Script tags
@@ -110,49 +105,49 @@ class InputValidator:
         r"eval\s*\(",  # Eval calls
         r"exec\s*\(",  # Exec calls
     ]
-    
+
     MAX_PROMPT_LENGTH = 500000  # 500k chars max
     MAX_MESSAGES = 100
-    
+
     @classmethod
-    def validate_prompt(cls, prompt: str) -> Tuple[bool, str]:
+    def validate_prompt(cls, prompt: str) -> tuple[bool, str]:
         """Validate user prompt for security issues"""
         if not prompt or not isinstance(prompt, str):
             return False, "Invalid prompt: must be a non-empty string"
-        
+
         if len(prompt) > cls.MAX_PROMPT_LENGTH:
             return False, f"Prompt exceeds maximum length of {cls.MAX_PROMPT_LENGTH}"
-        
+
         # Check for suspicious patterns (log but don't block - could be legitimate code)
         for pattern in cls.SUSPICIOUS_PATTERNS:
             if re.search(pattern, prompt, re.IGNORECASE):
                 logger.warning(
                     f"Potentially suspicious pattern in prompt: {pattern}"
                 )
-        
+
         return True, ""
-    
+
     @classmethod
-    def validate_messages(cls, messages: List[Dict]) -> Tuple[bool, str]:
+    def validate_messages(cls, messages: list[dict]) -> tuple[bool, str]:
         """Validate message array"""
         if not messages or not isinstance(messages, list):
             return False, "Invalid messages: must be a non-empty list"
-        
+
         if len(messages) > cls.MAX_MESSAGES:
             return False, f"Too many messages: max {cls.MAX_MESSAGES}"
-        
+
         for i, msg in enumerate(messages):
             if not isinstance(msg, dict):
                 return False, f"Message {i} must be a dictionary"
             if "role" not in msg or "content" not in msg:
                 return False, f"Message {i} missing required fields"
-            
+
             is_valid, error = cls.validate_prompt(msg["content"])
             if not is_valid:
                 return False, f"Message {i}: {error}"
-        
+
         return True, ""
-    
+
     @classmethod
     def sanitize_for_logging(cls, text: str, max_len: int = 100) -> str:
         """Sanitize text for safe logging (no sensitive data)"""
@@ -172,19 +167,19 @@ class InputValidator:
 
 class RateLimiter:
     """Token bucket rate limiter with per-provider limits"""
-    
+
     def __init__(self):
-        self._states: Dict[str, RateLimitState] = {}
+        self._states: dict[str, RateLimitState] = {}
         self._lock = asyncio.Lock()
-    
+
     def _get_state(self, provider: str) -> RateLimitState:
         if provider not in self._states:
             self._states[provider] = RateLimitState()
         return self._states[provider]
-    
+
     async def check_and_wait(
-        self, 
-        provider: str, 
+        self,
+        provider: str,
         estimated_tokens: int = 1000
     ) -> bool:
         """Check rate limits and wait if necessary"""
@@ -192,20 +187,20 @@ class RateLimiter:
             state = self._get_state(provider)
             now = time.time()
             window_start = now - 60
-            
+
             # Clean old entries
             while state.requests and state.requests[0] < window_start:
                 state.requests.popleft()
             while state.tokens and state.tokens[0][0] < window_start:
                 state.tokens.popleft()
-            
+
             # Check request limit
             if len(state.requests) >= state.max_requests_per_minute:
                 wait_time = state.requests[0] - window_start
                 logger.info(f"Rate limited on {provider}, waiting {wait_time:.1f}s")
                 await asyncio.sleep(wait_time)
                 return await self.check_and_wait(provider, estimated_tokens)
-            
+
             # Check token limit
             current_tokens = sum(t[1] for t in state.tokens)
             if current_tokens + estimated_tokens > state.max_tokens_per_minute:
@@ -213,7 +208,7 @@ class RateLimiter:
                 logger.info(f"Token rate limited on {provider}, waiting {wait_time:.1f}s")
                 await asyncio.sleep(wait_time)
                 return await self.check_and_wait(provider, estimated_tokens)
-            
+
             # Record this request
             state.requests.append(now)
             state.tokens.append((now, estimated_tokens))
@@ -222,7 +217,7 @@ class RateLimiter:
 
 class RetryHandler:
     """Exponential backoff retry handler"""
-    
+
     RETRYABLE_ERRORS = [
         "rate_limit",
         "timeout",
@@ -232,13 +227,13 @@ class RetryHandler:
         "502",
         "500",
     ]
-    
+
     @classmethod
     def is_retryable(cls, error: str) -> bool:
         """Check if error is retryable"""
         error_lower = error.lower()
         return any(e in error_lower for e in cls.RETRYABLE_ERRORS)
-    
+
     @classmethod
     async def execute_with_retry(
         cls,
@@ -249,51 +244,51 @@ class RetryHandler:
     ):
         """Execute function with exponential backoff retry"""
         last_error = None
-        
+
         for attempt in range(max_retries + 1):
             try:
                 return await func()
             except Exception as e:
                 last_error = e
                 error_str = str(e)
-                
+
                 if attempt == max_retries or not cls.is_retryable(error_str):
                     raise
-                
+
                 delay = min(base_delay * (2 ** attempt), max_delay)
                 # Add jitter
                 delay *= (0.5 + 0.5 * (hash(str(time.time())) % 100) / 100)
-                
+
                 logger.warning(
                     f"Retrying after error (attempt {attempt + 1}): "
                     f"{InputValidator.sanitize_for_logging(error_str)}"
                 )
                 await asyncio.sleep(delay)
-        
+
         raise last_error
 
 
 class BaseProvider(ABC):
     """Abstract base class for AI providers"""
-    
+
     def __init__(self, rate_limiter: RateLimiter):
         self.rate_limiter = rate_limiter
         self._client = None
-    
+
     @property
     @abstractmethod
     def provider_name(self) -> str:
         pass
-    
+
     @abstractmethod
     async def initialize(self) -> bool:
         """Initialize the provider client"""
         pass
-    
+
     @abstractmethod
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
@@ -303,17 +298,17 @@ class BaseProvider(ABC):
 
 class OpenAIProvider(BaseProvider):
     """OpenAI API provider"""
-    
+
     @property
     def provider_name(self) -> str:
         return "openai"
-    
+
     async def initialize(self) -> bool:
         api_key = get_api_key("openai")
         if not api_key:
             logger.error("OpenAI API key not configured")
             return False
-        
+
         try:
             from openai import AsyncOpenAI
             self._client = AsyncOpenAI(api_key=api_key)
@@ -321,33 +316,33 @@ class OpenAIProvider(BaseProvider):
         except ImportError:
             logger.error("openai package not installed")
             return False
-    
+
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        
+
         start_time = time.time()
-        
+
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
                 kwargs.get("max_tokens", 1000)
             )
-            
+
             response = await self._client.chat.completions.create(
                 model=model,
                 messages=messages,
                 max_tokens=kwargs.get("max_tokens", 4096),
                 temperature=kwargs.get("temperature", 0.7),
             )
-            
+
             latency = (time.time() - start_time) * 1000
-            
+
             return APIResponse(
                 content=response.choices[0].message.content,
                 model=model,
@@ -373,17 +368,17 @@ class OpenAIProvider(BaseProvider):
 
 class AnthropicProvider(BaseProvider):
     """Anthropic Claude API provider"""
-    
+
     @property
     def provider_name(self) -> str:
         return "anthropic"
-    
+
     async def initialize(self) -> bool:
         api_key = get_api_key("anthropic")
         if not api_key:
             logger.error("Anthropic API key not configured")
             return False
-        
+
         try:
             import anthropic
             self._client = anthropic.AsyncAnthropic(api_key=api_key)
@@ -391,24 +386,24 @@ class AnthropicProvider(BaseProvider):
         except ImportError:
             logger.error("anthropic package not installed")
             return False
-    
+
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        
+
         start_time = time.time()
-        
+
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
                 kwargs.get("max_tokens", 1000)
             )
-            
+
             # Extract system message if present
             system = ""
             chat_messages = []
@@ -417,20 +412,20 @@ class AnthropicProvider(BaseProvider):
                     system = msg["content"]
                 else:
                     chat_messages.append(msg)
-            
+
             response = await self._client.messages.create(
                 model=model,
                 max_tokens=kwargs.get("max_tokens", 4096),
                 system=system if system else None,
                 messages=chat_messages,
             )
-            
+
             latency = (time.time() - start_time) * 1000
-            
+
             content = ""
             if response.content:
                 content = response.content[0].text
-            
+
             return APIResponse(
                 content=content,
                 model=model,
@@ -456,17 +451,17 @@ class AnthropicProvider(BaseProvider):
 
 class GoogleProvider(BaseProvider):
     """Google Gemini API provider"""
-    
+
     @property
     def provider_name(self) -> str:
         return "google"
-    
+
     async def initialize(self) -> bool:
         api_key = get_api_key("google")
         if not api_key:
             logger.error("Google API key not configured")
             return False
-        
+
         try:
             import google.generativeai as genai
             genai.configure(api_key=api_key)
@@ -475,35 +470,35 @@ class GoogleProvider(BaseProvider):
         except ImportError:
             logger.error("google-generativeai package not installed")
             return False
-    
+
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
         if not hasattr(self, '_genai'):
             await self.initialize()
-        
+
         start_time = time.time()
-        
+
         try:
             await self.rate_limiter.check_and_wait(self.provider_name, 1000)
-            
+
             gemini_model = self._genai.GenerativeModel(model)
-            
+
             # Convert messages to Gemini format
             prompt = "\n".join(
-                f"{msg['role']}: {msg['content']}" 
+                f"{msg['role']}: {msg['content']}"
                 for msg in messages
             )
-            
+
             response = await asyncio.to_thread(
                 gemini_model.generate_content, prompt
             )
-            
+
             latency = (time.time() - start_time) * 1000
-            
+
             return APIResponse(
                 content=response.text,
                 model=model,
@@ -551,7 +546,7 @@ class OllamaProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
@@ -627,7 +622,7 @@ class MistralProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
@@ -709,7 +704,7 @@ class GroqProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
@@ -791,7 +786,7 @@ class XAIProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
@@ -873,7 +868,7 @@ class PerplexityProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
@@ -955,7 +950,7 @@ class DeepSeekProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: List[Dict],
+        messages: list[dict],
         model: str,
         **kwargs
     ) -> APIResponse:
@@ -1009,7 +1004,7 @@ class DeepSeekProvider(BaseProvider):
 
 class TaskClassifier:
     """Classify user prompts into task types"""
-    
+
     # Keywords for each task type
     TASK_PATTERNS = {
         TaskType.CODE_GENERATION: [
@@ -1056,43 +1051,43 @@ class TaskClassifier:
             r'\b(no cloud|internal|proprietary)\b',
         ],
     }
-    
+
     @classmethod
-    def classify(cls, prompt: str) -> List[Tuple[TaskType, float]]:
+    def classify(cls, prompt: str) -> list[tuple[TaskType, float]]:
         """
         Classify prompt into task types with confidence scores.
         Returns list of (TaskType, confidence) tuples, sorted by confidence.
         """
-        scores: Dict[TaskType, float] = {}
+        scores: dict[TaskType, float] = {}
         prompt_lower = prompt.lower()
-        
+
         for task_type, patterns in cls.TASK_PATTERNS.items():
             score = 0.0
             for pattern in patterns:
                 matches = re.findall(pattern, prompt_lower)
                 score += len(matches) * 0.3
-            
+
             if score > 0:
                 scores[task_type] = min(score, 1.0)
-        
+
         # Default to general NLP if no patterns matched
         if not scores:
             scores[TaskType.GENERAL_NLP] = 0.5
-        
+
         return sorted(scores.items(), key=lambda x: -x[1])
 
 
 class ModelRegistry:
     """Registry of available AI models and their capabilities"""
-    
+
     # Current models as of November 2025
-    MODELS: Dict[str, ModelCapability] = {
+    MODELS: dict[str, ModelCapability] = {
         # OpenAI Models
         "gpt-4o": ModelCapability(
             name="GPT-4o",
             provider="openai",
             model_id="gpt-4o",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION, 
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
                        TaskType.REASONING, TaskType.MULTIMODAL),
             context_window=128000,
             cost_per_1k_input=0.005,
@@ -1116,7 +1111,7 @@ class ModelRegistry:
             name="o1",
             provider="openai",
             model_id="o1",
-            task_types=(TaskType.DEEP_REASONING, TaskType.MATH, 
+            task_types=(TaskType.DEEP_REASONING, TaskType.MATH,
                        TaskType.CODE_GENERATION),
             context_window=200000,
             cost_per_1k_input=0.015,
@@ -1134,7 +1129,7 @@ class ModelRegistry:
             cost_per_1k_output=0.012,
             strengths=("reasoning", "coding", "cost-effective"),
         ),
-        
+
         # Anthropic Models
         "claude-opus-4.5": ModelCapability(
             name="Claude Opus 4.5",
@@ -1171,7 +1166,7 @@ class ModelRegistry:
             strengths=("very fast", "cost-effective", "good for simple tasks"),
             max_output_tokens=8000,
         ),
-        
+
         # Google Models
         "gemini-2.0-flash": ModelCapability(
             name="Gemini 2.0 Flash",
@@ -1197,7 +1192,7 @@ class ModelRegistry:
             strengths=("2M context", "multimodal", "data analysis"),
             supports_vision=True,
         ),
-        
+
         # Local Models (Ollama)
         "llama3.2": ModelCapability(
             name="Llama 3.2",
@@ -1358,17 +1353,17 @@ class ModelRegistry:
             strengths=("deep reasoning", "math", "problem-solving"),
         ),
     }
-    
+
     @classmethod
-    def get_model(cls, model_key: str) -> Optional[ModelCapability]:
+    def get_model(cls, model_key: str) -> ModelCapability | None:
         return cls.MODELS.get(model_key)
-    
+
     @classmethod
     def get_models_for_task(
-        cls, 
+        cls,
         task_type: TaskType,
         require_local: bool = False,
-    ) -> List[ModelCapability]:
+    ) -> list[ModelCapability]:
         """Get models suitable for a task type"""
         suitable = []
         for model in cls.MODELS.values():
@@ -1376,7 +1371,7 @@ class ModelRegistry:
                 if require_local and model.provider != "ollama":
                     continue
                 suitable.append(model)
-        
+
         # Sort by cost (cheapest first, unless it's local which is free)
         return sorted(suitable, key=lambda m: m.cost_per_1k_input)
 
@@ -1384,7 +1379,7 @@ class ModelRegistry:
 class AIOrchestrator:
     """
     Main AI Orchestrator that intelligently routes queries to the best model.
-    
+
     Features:
     - Automatic task classification
     - Optimal model selection based on task type
@@ -1392,7 +1387,7 @@ class AIOrchestrator:
     - Rate limiting and retry logic
     - Comprehensive logging
     """
-    
+
     def __init__(
         self,
         prefer_local: bool = False,
@@ -1402,21 +1397,21 @@ class AIOrchestrator:
         self.prefer_local = prefer_local
         self.cost_optimize = cost_optimize
         self.verbose = verbose
-        
+
         self.rate_limiter = RateLimiter()
-        self.providers: Dict[str, BaseProvider] = {}
-        self.conversation_history: List[Dict] = []
-        
+        self.providers: dict[str, BaseProvider] = {}
+        self.conversation_history: list[dict] = []
+
         self._setup_logging()
-    
+
     def _setup_logging(self):
         level = logging.DEBUG if self.verbose else logging.INFO
         logging.basicConfig(
             level=level,
             format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-    
-    async def _get_provider(self, provider_name: str) -> Optional[BaseProvider]:
+
+    async def _get_provider(self, provider_name: str) -> BaseProvider | None:
         """Get or initialize a provider"""
         if provider_name not in self.providers:
             if provider_name == "openai":
@@ -1447,75 +1442,75 @@ class AIOrchestrator:
                 return None
 
         return self.providers.get(provider_name)
-    
+
     def select_model(
         self,
-        task_types: List[Tuple[TaskType, float]],
-    ) -> Optional[ModelCapability]:
+        task_types: list[tuple[TaskType, float]],
+    ) -> ModelCapability | None:
         """Select the best model for the given task types"""
         if not task_types:
             task_types = [(TaskType.GENERAL_NLP, 0.5)]
-        
+
         primary_task = task_types[0][0]
-        
+
         # Get suitable models
         candidates = ModelRegistry.get_models_for_task(
             primary_task,
             require_local=self.prefer_local
         )
-        
+
         if not candidates:
             # Fallback to any available model
             candidates = list(ModelRegistry.MODELS.values())
-        
+
         # Score candidates
         scored = []
         for model in candidates:
             score = 0.0
-            
+
             # Task match score
             for task, confidence in task_types:
                 if task in model.task_types:
                     score += confidence * 10
-            
+
             # Cost optimization
             if self.cost_optimize:
                 score -= model.cost_per_1k_input * 100
-            
+
             # Context window bonus for long context tasks
             if TaskType.LONG_CONTEXT in [t[0] for t in task_types]:
                 score += model.context_window / 100000
-            
+
             scored.append((model, score))
-        
+
         if not scored:
             return None
-        
+
         scored.sort(key=lambda x: -x[1])
-        
+
         if self.verbose:
             logger.info(f"Model scores: {[(m.name, s) for m, s in scored[:5]]}")
-        
+
         return scored[0][0]
-    
+
     async def query(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
-        model_override: Optional[str] = None,
+        system_prompt: str | None = None,
+        model_override: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
     ) -> APIResponse:
         """
         Send a query to the AI orchestrator.
-        
+
         Args:
             prompt: The user's prompt
             system_prompt: Optional system prompt
             model_override: Force a specific model
             max_tokens: Maximum response tokens
             temperature: Sampling temperature
-        
+
         Returns:
             APIResponse with the result
         """
@@ -1531,13 +1526,13 @@ class AIOrchestrator:
                 success=False,
                 error=error,
             )
-        
+
         # Classify task
         task_types = TaskClassifier.classify(prompt)
-        
+
         if self.verbose:
             logger.info(f"Classified task types: {task_types}")
-        
+
         # Select model
         if model_override:
             model = ModelRegistry.get_model(model_override)
@@ -1563,9 +1558,9 @@ class AIOrchestrator:
                     success=False,
                     error="No suitable model found",
                 )
-        
+
         logger.info(f"Selected model: {model.name} ({model.provider})")
-        
+
         # Get provider
         provider = await self._get_provider(model.provider)
         if not provider:
@@ -1578,14 +1573,14 @@ class AIOrchestrator:
                 success=False,
                 error=f"Provider {model.provider} not available",
             )
-        
+
         # Build messages
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.extend(self.conversation_history)
         messages.append({"role": "user", "content": prompt})
-        
+
         # Execute with retry
         async def execute():
             return await provider.complete(
@@ -1594,29 +1589,29 @@ class AIOrchestrator:
                 max_tokens=max_tokens,
                 temperature=temperature,
             )
-        
+
         response = await RetryHandler.execute_with_retry(execute)
-        
+
         # Update conversation history
         if response.success:
             self.conversation_history.append({"role": "user", "content": prompt})
             self.conversation_history.append({
-                "role": "assistant", 
+                "role": "assistant",
                 "content": response.content
             })
-        
+
         return response
-    
+
     def clear_history(self):
         """Clear conversation history"""
         self.conversation_history.clear()
-    
+
     async def multi_model_query(
         self,
         prompt: str,
-        models: List[str],
-        system_prompt: Optional[str] = None,
-    ) -> Dict[str, APIResponse]:
+        models: list[str],
+        system_prompt: str | None = None,
+    ) -> dict[str, APIResponse]:
         """
         Query multiple models in parallel for comparison.
         """
@@ -1629,11 +1624,11 @@ class AIOrchestrator:
                     model_override=model_key,
                 )
             )
-        
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
-        
+
         return {
-            model: result if not isinstance(result, Exception) 
+            model: result if not isinstance(result, Exception)
                    else APIResponse(
                        content="",
                        model=model,
@@ -1643,14 +1638,14 @@ class AIOrchestrator:
                        success=False,
                        error=str(result),
                    )
-            for model, result in zip(models, results)
+            for model, result in zip(models, results, strict=False)
         }
 
 
 async def main():
     """CLI interface for the orchestrator"""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="AI Orchestrator CLI")
     parser.add_argument("prompt", nargs="?", help="The prompt to send")
     parser.add_argument("--model", "-m", help="Override model selection")
@@ -1659,14 +1654,14 @@ async def main():
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--configure", action="store_true", help="Configure API keys")
     parser.add_argument("--list-models", action="store_true", help="List available models")
-    
+
     args = parser.parse_args()
-    
+
     if args.configure:
         from credentials import configure_credentials_interactive
         configure_credentials_interactive()
         return
-    
+
     if args.list_models:
         print("\nAvailable Models:")
         print("=" * 60)
@@ -1678,22 +1673,22 @@ async def main():
             print(f"  Cost: ${model.cost_per_1k_input}/1k input, ${model.cost_per_1k_output}/1k output")
             print(f"  Strengths: {', '.join(model.strengths)}")
         return
-    
+
     if not args.prompt:
         parser.print_help()
         return
-    
+
     orchestrator = AIOrchestrator(
         prefer_local=args.local,
         cost_optimize=args.cheap,
         verbose=args.verbose,
     )
-    
+
     response = await orchestrator.query(
         prompt=args.prompt,
         model_override=args.model,
     )
-    
+
     if response.success:
         print(f"\n[{response.model}] ({response.latency_ms:.0f}ms)")
         print("-" * 60)

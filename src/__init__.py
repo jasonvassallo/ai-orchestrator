@@ -14,54 +14,53 @@ Security Features:
 
 Example Usage:
     >>> from src import AIOrchestrator, get_api_key, set_api_key
-    >>> 
+    >>>
     >>> # Configure credentials (run once)
     >>> set_api_key("openai", "sk-...")
     >>> set_api_key("anthropic", "sk-ant-...")
-    >>> 
+    >>>
     >>> # Use the orchestrator
     >>> import asyncio
-    >>> 
+    >>>
     >>> async def main():
     ...     orchestrator = AIOrchestrator()
     ...     response = await orchestrator.query("Explain quantum computing")
     ...     print(response.content)
-    >>> 
+    >>>
     >>> asyncio.run(main())
 """
 
 __version__ = "2.0.0"
-__author__ = "AI Orchestrator Team"
+__author__ = "Jason Vassallo"
 
 from .credentials import (
-    get_api_key,
-    set_api_key,
-    get_credential_manager,
     CredentialManager,
     configure_credentials_interactive,
+    get_api_key,
+    get_credential_manager,
+    set_api_key,
 )
-
 from .orchestrator import (
     AIOrchestrator,
-    TaskType,
-    TaskClassifier,
-    ModelCapability,
-    ModelRegistry,
     APIResponse,
     InputValidator,
+    ModelCapability,
+    ModelRegistry,
+    TaskClassifier,
+    TaskType,
 )
 
 __all__ = [
     # Version
     "__version__",
-    
+
     # Credential management
     "get_api_key",
     "set_api_key",
     "get_credential_manager",
     "CredentialManager",
     "configure_credentials_interactive",
-    
+
     # Orchestrator
     "AIOrchestrator",
     "TaskType",
