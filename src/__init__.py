@@ -30,25 +30,13 @@ Example Usage:
     >>> asyncio.run(main())
 """
 
+from __future__ import annotations
+
 __version__ = "2.0.0"
 __author__ = "Jason Vassallo"
 
-from .credentials import (
-    CredentialManager,
-    configure_credentials_interactive,
-    get_api_key,
-    get_credential_manager,
-    set_api_key,
-)
-from .orchestrator import (
-    AIOrchestrator,
-    APIResponse,
-    InputValidator,
-    ModelCapability,
-    ModelRegistry,
-    TaskClassifier,
-    TaskType,
-)
+from importlib import import_module
+from typing import Any
 
 __all__ = [
     # Version
@@ -70,3 +58,33 @@ __all__ = [
     "APIResponse",
     "InputValidator",
 ]
+
+_CREDENTIALS_EXPORTS = {
+    "get_api_key",
+    "set_api_key",
+    "get_credential_manager",
+    "CredentialManager",
+    "configure_credentials_interactive",
+}
+
+_ORCHESTRATOR_EXPORTS = {
+    "AIOrchestrator",
+    "TaskType",
+    "TaskClassifier",
+    "ModelCapability",
+    "ModelRegistry",
+    "APIResponse",
+    "InputValidator",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name in _CREDENTIALS_EXPORTS:
+        module = import_module(".credentials", __name__)
+    elif name in _ORCHESTRATOR_EXPORTS:
+        module = import_module(".orchestrator", __name__)
+    else:
+        raise AttributeError(f"module {__name__} has no attribute {name}")
+    value = getattr(module, name)
+    globals()[name] = value
+    return value
