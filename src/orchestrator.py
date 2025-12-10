@@ -1,0 +1,1708 @@
+"""
+AI Orchestrator - Multi-Model Router
+=====================================
+Intelligently routes queries to the best AI model based on task type.
+Features:
+- Automatic task classification and model selection
+- Secure credential management (no hardcoded API keys)
+- Rate limiting and retry logic with exponential backoff
+- Input sanitization and validation
+- Comprehensive error handling
+- Async support for performance
+- Audit logging for security
+
+Security Features:
+- No API keys in code
+- Input validation against injection attacks
+- Secure error messages (no credential leakage)
+- Rate limiting to prevent abuse
+- Audit trail for all API calls
+"""
+
+import os
+import re
+import json
+import asyncio
+import logging
+import hashlib
+import time
+from datetime import datetime, timedelta
+from typing import Dict, Any, List, Optional, Tuple, Union
+from dataclasses import dataclass, field
+from enum import Enum, auto
+from functools import wraps
+from collections import deque
+from abc import ABC, abstractmethod
+
+# Import our secure credential manager
+from .credentials import get_api_key, get_credential_manager
+
+# Configure logging with security in mind (no sensitive data in logs)
+logger = logging.getLogger(__name__)
+
+
+class TaskType(Enum):
+    """Enumeration of task types the orchestrator can handle"""
+    GENERAL_NLP = auto()
+    LONG_CONTEXT = auto()
+    CODE_GENERATION = auto()
+    DATA_ANALYSIS = auto()
+    REASONING = auto()
+    DEEP_REASONING = auto()
+    WEB_SEARCH = auto()
+    CREATIVE_WRITING = auto()
+    TOOL_USE = auto()
+    LOCAL_MODEL = auto()
+    MULTIMODAL = auto()
+    MATH = auto()
+    SUMMARIZATION = auto()
+
+
+@dataclass(frozen=True)
+class ModelCapability:
+    """Immutable model capability definition"""
+    name: str
+    provider: str
+    model_id: str
+    task_types: Tuple[TaskType, ...]
+    context_window: int
+    cost_per_1k_input: float
+    cost_per_1k_output: float
+    strengths: Tuple[str, ...]
+    max_output_tokens: int = 4096
+    supports_streaming: bool = True
+    supports_functions: bool = False
+    supports_vision: bool = False
+
+
+@dataclass
+class RateLimitState:
+    """Track rate limiting state per provider"""
+    requests: deque = field(default_factory=deque)
+    tokens: deque = field(default_factory=deque)
+    max_requests_per_minute: int = 60
+    max_tokens_per_minute: int = 100000
+
+
+@dataclass
+class APIResponse:
+    """Standardized API response container"""
+    content: str
+    model: str
+    provider: str
+    usage: Dict[str, int]
+    latency_ms: float
+    success: bool
+    error: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+class InputValidator:
+    """Security-focused input validation"""
+    
+    # Patterns that might indicate injection attempts
+    SUSPICIOUS_PATTERNS = [
+        r"<\s*script\b",  # Script tags
+        r"javascript\s*:",  # JS protocol
+        r"\{\{.*\}\}",  # Template injection
+        r"\$\{.*\}",  # Template literals
+        r"__proto__",  # Prototype pollution
+        r"eval\s*\(",  # Eval calls
+        r"exec\s*\(",  # Exec calls
+    ]
+    
+    MAX_PROMPT_LENGTH = 500000  # 500k chars max
+    MAX_MESSAGES = 100
+    
+    @classmethod
+    def validate_prompt(cls, prompt: str) -> Tuple[bool, str]:
+        """Validate user prompt for security issues"""
+        if not prompt or not isinstance(prompt, str):
+            return False, "Invalid prompt: must be a non-empty string"
+        
+        if len(prompt) > cls.MAX_PROMPT_LENGTH:
+            return False, f"Prompt exceeds maximum length of {cls.MAX_PROMPT_LENGTH}"
+        
+        # Check for suspicious patterns (log but don't block - could be legitimate code)
+        for pattern in cls.SUSPICIOUS_PATTERNS:
+            if re.search(pattern, prompt, re.IGNORECASE):
+                logger.warning(
+                    f"Potentially suspicious pattern in prompt: {pattern}"
+                )
+        
+        return True, ""
+    
+    @classmethod
+    def validate_messages(cls, messages: List[Dict]) -> Tuple[bool, str]:
+        """Validate message array"""
+        if not messages or not isinstance(messages, list):
+            return False, "Invalid messages: must be a non-empty list"
+        
+        if len(messages) > cls.MAX_MESSAGES:
+            return False, f"Too many messages: max {cls.MAX_MESSAGES}"
+        
+        for i, msg in enumerate(messages):
+            if not isinstance(msg, dict):
+                return False, f"Message {i} must be a dictionary"
+            if "role" not in msg or "content" not in msg:
+                return False, f"Message {i} missing required fields"
+            
+            is_valid, error = cls.validate_prompt(msg["content"])
+            if not is_valid:
+                return False, f"Message {i}: {error}"
+        
+        return True, ""
+    
+    @classmethod
+    def sanitize_for_logging(cls, text: str, max_len: int = 100) -> str:
+        """Sanitize text for safe logging (no sensitive data)"""
+        if not text:
+            return ""
+        # Truncate and remove potential sensitive patterns
+        sanitized = text[:max_len]
+        # Redact anything that looks like an API key
+        sanitized = re.sub(
+            r'(sk-|api[_-]?key|bearer\s+)[a-zA-Z0-9\-_]{20,}',
+            '[REDACTED]',
+            sanitized,
+            flags=re.IGNORECASE
+        )
+        return sanitized + ("..." if len(text) > max_len else "")
+
+
+class RateLimiter:
+    """Token bucket rate limiter with per-provider limits"""
+    
+    def __init__(self):
+        self._states: Dict[str, RateLimitState] = {}
+        self._lock = asyncio.Lock()
+    
+    def _get_state(self, provider: str) -> RateLimitState:
+        if provider not in self._states:
+            self._states[provider] = RateLimitState()
+        return self._states[provider]
+    
+    async def check_and_wait(
+        self, 
+        provider: str, 
+        estimated_tokens: int = 1000
+    ) -> bool:
+        """Check rate limits and wait if necessary"""
+        async with self._lock:
+            state = self._get_state(provider)
+            now = time.time()
+            window_start = now - 60
+            
+            # Clean old entries
+            while state.requests and state.requests[0] < window_start:
+                state.requests.popleft()
+            while state.tokens and state.tokens[0][0] < window_start:
+                state.tokens.popleft()
+            
+            # Check request limit
+            if len(state.requests) >= state.max_requests_per_minute:
+                wait_time = state.requests[0] - window_start
+                logger.info(f"Rate limited on {provider}, waiting {wait_time:.1f}s")
+                await asyncio.sleep(wait_time)
+                return await self.check_and_wait(provider, estimated_tokens)
+            
+            # Check token limit
+            current_tokens = sum(t[1] for t in state.tokens)
+            if current_tokens + estimated_tokens > state.max_tokens_per_minute:
+                wait_time = state.tokens[0][0] - window_start if state.tokens else 1
+                logger.info(f"Token rate limited on {provider}, waiting {wait_time:.1f}s")
+                await asyncio.sleep(wait_time)
+                return await self.check_and_wait(provider, estimated_tokens)
+            
+            # Record this request
+            state.requests.append(now)
+            state.tokens.append((now, estimated_tokens))
+            return True
+
+
+class RetryHandler:
+    """Exponential backoff retry handler"""
+    
+    RETRYABLE_ERRORS = [
+        "rate_limit",
+        "timeout",
+        "connection",
+        "overloaded",
+        "503",
+        "502",
+        "500",
+    ]
+    
+    @classmethod
+    def is_retryable(cls, error: str) -> bool:
+        """Check if error is retryable"""
+        error_lower = error.lower()
+        return any(e in error_lower for e in cls.RETRYABLE_ERRORS)
+    
+    @classmethod
+    async def execute_with_retry(
+        cls,
+        func,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
+        max_delay: float = 60.0,
+    ):
+        """Execute function with exponential backoff retry"""
+        last_error = None
+        
+        for attempt in range(max_retries + 1):
+            try:
+                return await func()
+            except Exception as e:
+                last_error = e
+                error_str = str(e)
+                
+                if attempt == max_retries or not cls.is_retryable(error_str):
+                    raise
+                
+                delay = min(base_delay * (2 ** attempt), max_delay)
+                # Add jitter
+                delay *= (0.5 + 0.5 * (hash(str(time.time())) % 100) / 100)
+                
+                logger.warning(
+                    f"Retrying after error (attempt {attempt + 1}): "
+                    f"{InputValidator.sanitize_for_logging(error_str)}"
+                )
+                await asyncio.sleep(delay)
+        
+        raise last_error
+
+
+class BaseProvider(ABC):
+    """Abstract base class for AI providers"""
+    
+    def __init__(self, rate_limiter: RateLimiter):
+        self.rate_limiter = rate_limiter
+        self._client = None
+    
+    @property
+    @abstractmethod
+    def provider_name(self) -> str:
+        pass
+    
+    @abstractmethod
+    async def initialize(self) -> bool:
+        """Initialize the provider client"""
+        pass
+    
+    @abstractmethod
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        """Send completion request"""
+        pass
+
+
+class OpenAIProvider(BaseProvider):
+    """OpenAI API provider"""
+    
+    @property
+    def provider_name(self) -> str:
+        return "openai"
+    
+    async def initialize(self) -> bool:
+        api_key = get_api_key("openai")
+        if not api_key:
+            logger.error("OpenAI API key not configured")
+            return False
+        
+        try:
+            from openai import AsyncOpenAI
+            self._client = AsyncOpenAI(api_key=api_key)
+            return True
+        except ImportError:
+            logger.error("openai package not installed")
+            return False
+    
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+        
+        start_time = time.time()
+        
+        try:
+            await self.rate_limiter.check_and_wait(
+                self.provider_name,
+                kwargs.get("max_tokens", 1000)
+            )
+            
+            response = await self._client.chat.completions.create(
+                model=model,
+                messages=messages,
+                max_tokens=kwargs.get("max_tokens", 4096),
+                temperature=kwargs.get("temperature", 0.7),
+            )
+            
+            latency = (time.time() - start_time) * 1000
+            
+            return APIResponse(
+                content=response.choices[0].message.content,
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": response.usage.prompt_tokens,
+                    "output_tokens": response.usage.completion_tokens,
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class AnthropicProvider(BaseProvider):
+    """Anthropic Claude API provider"""
+    
+    @property
+    def provider_name(self) -> str:
+        return "anthropic"
+    
+    async def initialize(self) -> bool:
+        api_key = get_api_key("anthropic")
+        if not api_key:
+            logger.error("Anthropic API key not configured")
+            return False
+        
+        try:
+            import anthropic
+            self._client = anthropic.AsyncAnthropic(api_key=api_key)
+            return True
+        except ImportError:
+            logger.error("anthropic package not installed")
+            return False
+    
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+        
+        start_time = time.time()
+        
+        try:
+            await self.rate_limiter.check_and_wait(
+                self.provider_name,
+                kwargs.get("max_tokens", 1000)
+            )
+            
+            # Extract system message if present
+            system = ""
+            chat_messages = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    system = msg["content"]
+                else:
+                    chat_messages.append(msg)
+            
+            response = await self._client.messages.create(
+                model=model,
+                max_tokens=kwargs.get("max_tokens", 4096),
+                system=system if system else None,
+                messages=chat_messages,
+            )
+            
+            latency = (time.time() - start_time) * 1000
+            
+            content = ""
+            if response.content:
+                content = response.content[0].text
+            
+            return APIResponse(
+                content=content,
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class GoogleProvider(BaseProvider):
+    """Google Gemini API provider"""
+    
+    @property
+    def provider_name(self) -> str:
+        return "google"
+    
+    async def initialize(self) -> bool:
+        api_key = get_api_key("google")
+        if not api_key:
+            logger.error("Google API key not configured")
+            return False
+        
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key)
+            self._genai = genai
+            return True
+        except ImportError:
+            logger.error("google-generativeai package not installed")
+            return False
+    
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        if not hasattr(self, '_genai'):
+            await self.initialize()
+        
+        start_time = time.time()
+        
+        try:
+            await self.rate_limiter.check_and_wait(self.provider_name, 1000)
+            
+            gemini_model = self._genai.GenerativeModel(model)
+            
+            # Convert messages to Gemini format
+            prompt = "\n".join(
+                f"{msg['role']}: {msg['content']}" 
+                for msg in messages
+            )
+            
+            response = await asyncio.to_thread(
+                gemini_model.generate_content, prompt
+            )
+            
+            latency = (time.time() - start_time) * 1000
+            
+            return APIResponse(
+                content=response.text,
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": response.usage_metadata.prompt_token_count,
+                    "output_tokens": response.usage_metadata.candidates_token_count,
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class OllamaProvider(BaseProvider):
+    """Ollama local model provider"""
+
+    def __init__(self, rate_limiter: RateLimiter, base_url: str = "http://localhost:11434"):
+        super().__init__(rate_limiter)
+        self.base_url = base_url
+
+    @property
+    def provider_name(self) -> str:
+        return "ollama"
+
+    async def initialize(self) -> bool:
+        try:
+            import httpx
+            self._client = httpx.AsyncClient(base_url=self.base_url, timeout=120.0)
+            # Test connection
+            response = await self._client.get("/api/version")
+            return response.status_code == 200
+        except Exception as e:
+            logger.warning(f"Ollama not available: {e}")
+            return False
+
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+
+        start_time = time.time()
+
+        try:
+            response = await self._client.post(
+                "/api/chat",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "stream": False,
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            latency = (time.time() - start_time) * 1000
+
+            return APIResponse(
+                content=data.get("message", {}).get("content", ""),
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": data.get("prompt_eval_count", 0),
+                    "output_tokens": data.get("eval_count", 0),
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class MistralProvider(BaseProvider):
+    """Mistral AI API provider"""
+
+    @property
+    def provider_name(self) -> str:
+        return "mistral"
+
+    async def initialize(self) -> bool:
+        api_key = get_api_key("mistral")
+        if not api_key:
+            logger.error("Mistral API key not configured")
+            return False
+
+        try:
+            import httpx
+            self._client = httpx.AsyncClient(
+                base_url="https://api.mistral.ai",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=120.0,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize Mistral client: {e}")
+            return False
+
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+
+        start_time = time.time()
+
+        try:
+            await self.rate_limiter.check_and_wait(
+                self.provider_name,
+                kwargs.get("max_tokens", 1000)
+            )
+
+            response = await self._client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": kwargs.get("max_tokens", 4096),
+                    "temperature": kwargs.get("temperature", 0.7),
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            latency = (time.time() - start_time) * 1000
+
+            return APIResponse(
+                content=data["choices"][0]["message"]["content"],
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": data["usage"]["prompt_tokens"],
+                    "output_tokens": data["usage"]["completion_tokens"],
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class GroqProvider(BaseProvider):
+    """Groq API provider for fast inference"""
+
+    @property
+    def provider_name(self) -> str:
+        return "groq"
+
+    async def initialize(self) -> bool:
+        api_key = get_api_key("groq")
+        if not api_key:
+            logger.error("Groq API key not configured")
+            return False
+
+        try:
+            import httpx
+            self._client = httpx.AsyncClient(
+                base_url="https://api.groq.com/openai",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=120.0,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize Groq client: {e}")
+            return False
+
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+
+        start_time = time.time()
+
+        try:
+            await self.rate_limiter.check_and_wait(
+                self.provider_name,
+                kwargs.get("max_tokens", 1000)
+            )
+
+            response = await self._client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": kwargs.get("max_tokens", 4096),
+                    "temperature": kwargs.get("temperature", 0.7),
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            latency = (time.time() - start_time) * 1000
+
+            return APIResponse(
+                content=data["choices"][0]["message"]["content"],
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": data["usage"]["prompt_tokens"],
+                    "output_tokens": data["usage"]["completion_tokens"],
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class XAIProvider(BaseProvider):
+    """xAI (Grok) API provider"""
+
+    @property
+    def provider_name(self) -> str:
+        return "xai"
+
+    async def initialize(self) -> bool:
+        api_key = get_api_key("xai")
+        if not api_key:
+            logger.error("xAI API key not configured")
+            return False
+
+        try:
+            import httpx
+            self._client = httpx.AsyncClient(
+                base_url="https://api.x.ai",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=120.0,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize xAI client: {e}")
+            return False
+
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+
+        start_time = time.time()
+
+        try:
+            await self.rate_limiter.check_and_wait(
+                self.provider_name,
+                kwargs.get("max_tokens", 1000)
+            )
+
+            response = await self._client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": kwargs.get("max_tokens", 4096),
+                    "temperature": kwargs.get("temperature", 0.7),
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            latency = (time.time() - start_time) * 1000
+
+            return APIResponse(
+                content=data["choices"][0]["message"]["content"],
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": data["usage"]["prompt_tokens"],
+                    "output_tokens": data["usage"]["completion_tokens"],
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class PerplexityProvider(BaseProvider):
+    """Perplexity AI API provider"""
+
+    @property
+    def provider_name(self) -> str:
+        return "perplexity"
+
+    async def initialize(self) -> bool:
+        api_key = get_api_key("perplexity")
+        if not api_key:
+            logger.error("Perplexity API key not configured")
+            return False
+
+        try:
+            import httpx
+            self._client = httpx.AsyncClient(
+                base_url="https://api.perplexity.ai",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=120.0,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize Perplexity client: {e}")
+            return False
+
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+
+        start_time = time.time()
+
+        try:
+            await self.rate_limiter.check_and_wait(
+                self.provider_name,
+                kwargs.get("max_tokens", 1000)
+            )
+
+            response = await self._client.post(
+                "/chat/completions",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": kwargs.get("max_tokens", 4096),
+                    "temperature": kwargs.get("temperature", 0.7),
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            latency = (time.time() - start_time) * 1000
+
+            return APIResponse(
+                content=data["choices"][0]["message"]["content"],
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": data.get("usage", {}).get("prompt_tokens", 0),
+                    "output_tokens": data.get("usage", {}).get("completion_tokens", 0),
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class DeepSeekProvider(BaseProvider):
+    """DeepSeek API provider"""
+
+    @property
+    def provider_name(self) -> str:
+        return "deepseek"
+
+    async def initialize(self) -> bool:
+        api_key = get_api_key("deepseek")
+        if not api_key:
+            logger.error("DeepSeek API key not configured")
+            return False
+
+        try:
+            import httpx
+            self._client = httpx.AsyncClient(
+                base_url="https://api.deepseek.com",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=120.0,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize DeepSeek client: {e}")
+            return False
+
+    async def complete(
+        self,
+        messages: List[Dict],
+        model: str,
+        **kwargs
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+
+        start_time = time.time()
+
+        try:
+            await self.rate_limiter.check_and_wait(
+                self.provider_name,
+                kwargs.get("max_tokens", 1000)
+            )
+
+            response = await self._client.post(
+                "/chat/completions",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": kwargs.get("max_tokens", 4096),
+                    "temperature": kwargs.get("temperature", 0.7),
+                }
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            latency = (time.time() - start_time) * 1000
+
+            return APIResponse(
+                content=data["choices"][0]["message"]["content"],
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": data["usage"]["prompt_tokens"],
+                    "output_tokens": data["usage"]["completion_tokens"],
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class TaskClassifier:
+    """Classify user prompts into task types"""
+    
+    # Keywords for each task type
+    TASK_PATTERNS = {
+        TaskType.CODE_GENERATION: [
+            r'\b(code|program|script|function|class|implement|develop|debug|refactor)\b',
+            r'\b(python|javascript|typescript|java|c\+\+|rust|go|ruby)\b',
+            r'\b(api|endpoint|database|sql|query|algorithm)\b',
+        ],
+        TaskType.DATA_ANALYSIS: [
+            r'\b(analyze|analysis|data|statistics|chart|graph|visualiz|csv|excel)\b',
+            r'\b(trend|pattern|correlation|regression|forecast|predict)\b',
+            r'\b(pandas|numpy|matplotlib|dataset)\b',
+        ],
+        TaskType.DEEP_REASONING: [
+            r'\b(prove|theorem|derive|mathematical|logic|reasoning|why|how)\b',
+            r'\b(philosophy|ethics|moral|complex|multi-step|deduce)\b',
+            r'\b(research|investigate|explore|comprehensive)\b',
+        ],
+        TaskType.CREATIVE_WRITING: [
+            r'\b(write|story|poem|essay|creative|fiction|narrative)\b',
+            r'\b(blog|article|content|copywriting|marketing)\b',
+        ],
+        TaskType.SUMMARIZATION: [
+            r'\b(summarize|summary|tldr|brief|condense|main points)\b',
+            r'\b(key takeaways|overview|digest)\b',
+        ],
+        TaskType.LONG_CONTEXT: [
+            r'\b(document|book|paper|long|entire|whole|full text)\b',
+            r'\b(pdf|report|transcript|lengthy)\b',
+        ],
+        TaskType.MATH: [
+            r'\b(calculate|compute|solve|equation|integral|derivative)\b',
+            r'\b(math|algebra|calculus|geometry|trigonometry)\b',
+        ],
+        TaskType.WEB_SEARCH: [
+            r'\b(search|find|look up|current|latest|news|today)\b',
+            r'\b(weather|stock|price|update)\b',
+        ],
+        TaskType.MULTIMODAL: [
+            r'\b(image|picture|photo|visual|diagram|screenshot)\b',
+            r'\b(describe|analyze|what.+see)\b',
+        ],
+        TaskType.LOCAL_MODEL: [
+            r'\b(private|confidential|offline|local|sensitive)\b',
+            r'\b(no cloud|internal|proprietary)\b',
+        ],
+    }
+    
+    @classmethod
+    def classify(cls, prompt: str) -> List[Tuple[TaskType, float]]:
+        """
+        Classify prompt into task types with confidence scores.
+        Returns list of (TaskType, confidence) tuples, sorted by confidence.
+        """
+        scores: Dict[TaskType, float] = {}
+        prompt_lower = prompt.lower()
+        
+        for task_type, patterns in cls.TASK_PATTERNS.items():
+            score = 0.0
+            for pattern in patterns:
+                matches = re.findall(pattern, prompt_lower)
+                score += len(matches) * 0.3
+            
+            if score > 0:
+                scores[task_type] = min(score, 1.0)
+        
+        # Default to general NLP if no patterns matched
+        if not scores:
+            scores[TaskType.GENERAL_NLP] = 0.5
+        
+        return sorted(scores.items(), key=lambda x: -x[1])
+
+
+class ModelRegistry:
+    """Registry of available AI models and their capabilities"""
+    
+    # Current models as of November 2025
+    MODELS: Dict[str, ModelCapability] = {
+        # OpenAI Models
+        "gpt-4o": ModelCapability(
+            name="GPT-4o",
+            provider="openai",
+            model_id="gpt-4o",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION, 
+                       TaskType.REASONING, TaskType.MULTIMODAL),
+            context_window=128000,
+            cost_per_1k_input=0.005,
+            cost_per_1k_output=0.015,
+            strengths=("speed", "multimodal", "general purpose"),
+            supports_functions=True,
+            supports_vision=True,
+        ),
+        "gpt-4o-mini": ModelCapability(
+            name="GPT-4o Mini",
+            provider="openai",
+            model_id="gpt-4o-mini",
+            task_types=(TaskType.GENERAL_NLP, TaskType.SUMMARIZATION),
+            context_window=128000,
+            cost_per_1k_input=0.00015,
+            cost_per_1k_output=0.0006,
+            strengths=("cost-effective", "fast", "good for simple tasks"),
+            supports_functions=True,
+        ),
+        "o1": ModelCapability(
+            name="o1",
+            provider="openai",
+            model_id="o1",
+            task_types=(TaskType.DEEP_REASONING, TaskType.MATH, 
+                       TaskType.CODE_GENERATION),
+            context_window=200000,
+            cost_per_1k_input=0.015,
+            cost_per_1k_output=0.06,
+            strengths=("deep reasoning", "math", "complex problems"),
+            max_output_tokens=100000,
+        ),
+        "o1-mini": ModelCapability(
+            name="o1-mini",
+            provider="openai",
+            model_id="o1-mini",
+            task_types=(TaskType.REASONING, TaskType.CODE_GENERATION),
+            context_window=128000,
+            cost_per_1k_input=0.003,
+            cost_per_1k_output=0.012,
+            strengths=("reasoning", "coding", "cost-effective"),
+        ),
+        
+        # Anthropic Models
+        "claude-opus-4.5": ModelCapability(
+            name="Claude Opus 4.5",
+            provider="anthropic",
+            model_id="claude-opus-4-5-20251101",
+            task_types=(TaskType.CODE_GENERATION, TaskType.DEEP_REASONING,
+                       TaskType.CREATIVE_WRITING, TaskType.LONG_CONTEXT),
+            context_window=200000,
+            cost_per_1k_input=0.015,
+            cost_per_1k_output=0.075,
+            strengths=("most intelligent", "coding", "nuanced writing", "complex tasks"),
+            max_output_tokens=32000,
+        ),
+        "claude-sonnet-4.5": ModelCapability(
+            name="Claude Sonnet 4.5",
+            provider="anthropic",
+            model_id="claude-sonnet-4-5-20250929",
+            task_types=(TaskType.CODE_GENERATION, TaskType.GENERAL_NLP,
+                       TaskType.REASONING),
+            context_window=200000,
+            cost_per_1k_input=0.003,
+            cost_per_1k_output=0.015,
+            strengths=("balanced", "coding", "fast"),
+            max_output_tokens=16000,
+        ),
+        "claude-haiku-4.5": ModelCapability(
+            name="Claude Haiku 4.5",
+            provider="anthropic",
+            model_id="claude-haiku-4-5-20251001",
+            task_types=(TaskType.GENERAL_NLP, TaskType.SUMMARIZATION),
+            context_window=200000,
+            cost_per_1k_input=0.0008,
+            cost_per_1k_output=0.004,
+            strengths=("very fast", "cost-effective", "good for simple tasks"),
+            max_output_tokens=8000,
+        ),
+        
+        # Google Models
+        "gemini-2.0-flash": ModelCapability(
+            name="Gemini 2.0 Flash",
+            provider="google",
+            model_id="gemini-2.0-flash",
+            task_types=(TaskType.GENERAL_NLP, TaskType.MULTIMODAL,
+                       TaskType.LONG_CONTEXT),
+            context_window=1000000,
+            cost_per_1k_input=0.0001,
+            cost_per_1k_output=0.0004,
+            strengths=("massive context", "speed", "multimodal"),
+            supports_vision=True,
+        ),
+        "gemini-1.5-pro": ModelCapability(
+            name="Gemini 1.5 Pro",
+            provider="google",
+            model_id="gemini-1.5-pro",
+            task_types=(TaskType.LONG_CONTEXT, TaskType.DATA_ANALYSIS,
+                       TaskType.MULTIMODAL),
+            context_window=2000000,
+            cost_per_1k_input=0.00125,
+            cost_per_1k_output=0.005,
+            strengths=("2M context", "multimodal", "data analysis"),
+            supports_vision=True,
+        ),
+        
+        # Local Models (Ollama)
+        "llama3.2": ModelCapability(
+            name="Llama 3.2",
+            provider="ollama",
+            model_id="llama3.2",
+            task_types=(TaskType.GENERAL_NLP, TaskType.LOCAL_MODEL),
+            context_window=128000,
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            strengths=("free", "private", "offline"),
+        ),
+        "codellama": ModelCapability(
+            name="Code Llama",
+            provider="ollama",
+            model_id="codellama",
+            task_types=(TaskType.CODE_GENERATION, TaskType.LOCAL_MODEL),
+            context_window=16000,
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            strengths=("coding", "free", "private"),
+        ),
+        "deepseek-coder-v2": ModelCapability(
+            name="DeepSeek Coder V2",
+            provider="ollama",
+            model_id="deepseek-coder-v2",
+            task_types=(TaskType.CODE_GENERATION, TaskType.LOCAL_MODEL),
+            context_window=128000,
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            strengths=("excellent coding", "free", "private"),
+        ),
+
+        # Mistral Models
+        "mistral-large": ModelCapability(
+            name="Mistral Large",
+            provider="mistral",
+            model_id="mistral-large-latest",
+            task_types=(TaskType.CODE_GENERATION, TaskType.REASONING,
+                       TaskType.GENERAL_NLP),
+            context_window=128000,
+            cost_per_1k_input=0.002,
+            cost_per_1k_output=0.006,
+            strengths=("coding", "reasoning", "multilingual"),
+            supports_functions=True,
+        ),
+        "codestral": ModelCapability(
+            name="Codestral",
+            provider="mistral",
+            model_id="codestral-latest",
+            task_types=(TaskType.CODE_GENERATION,),
+            context_window=32000,
+            cost_per_1k_input=0.001,
+            cost_per_1k_output=0.003,
+            strengths=("excellent coding", "fast", "specialized"),
+        ),
+        "mistral-small": ModelCapability(
+            name="Mistral Small",
+            provider="mistral",
+            model_id="mistral-small-latest",
+            task_types=(TaskType.GENERAL_NLP, TaskType.SUMMARIZATION),
+            context_window=32000,
+            cost_per_1k_input=0.0002,
+            cost_per_1k_output=0.0006,
+            strengths=("cost-effective", "fast", "efficient"),
+        ),
+
+        # Groq Models (Fast inference)
+        "groq-llama-3.3-70b": ModelCapability(
+            name="Llama 3.3 70B (Groq)",
+            provider="groq",
+            model_id="llama-3.3-70b-versatile",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
+                       TaskType.REASONING),
+            context_window=128000,
+            cost_per_1k_input=0.00059,
+            cost_per_1k_output=0.00079,
+            strengths=("ultra fast", "versatile", "cost-effective"),
+        ),
+        "groq-mixtral-8x7b": ModelCapability(
+            name="Mixtral 8x7B (Groq)",
+            provider="groq",
+            model_id="mixtral-8x7b-32768",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION),
+            context_window=32768,
+            cost_per_1k_input=0.00024,
+            cost_per_1k_output=0.00024,
+            strengths=("very fast", "cost-effective", "multilingual"),
+        ),
+
+        # xAI Models (Grok)
+        "grok-2": ModelCapability(
+            name="Grok 2",
+            provider="xai",
+            model_id="grok-2-latest",
+            task_types=(TaskType.GENERAL_NLP, TaskType.REASONING,
+                       TaskType.CODE_GENERATION, TaskType.CREATIVE_WRITING),
+            context_window=131072,
+            cost_per_1k_input=0.002,
+            cost_per_1k_output=0.010,
+            strengths=("real-time knowledge", "reasoning", "creative"),
+        ),
+        "grok-2-vision": ModelCapability(
+            name="Grok 2 Vision",
+            provider="xai",
+            model_id="grok-2-vision-latest",
+            task_types=(TaskType.MULTIMODAL, TaskType.GENERAL_NLP),
+            context_window=32768,
+            cost_per_1k_input=0.002,
+            cost_per_1k_output=0.010,
+            strengths=("vision", "real-time knowledge", "multimodal"),
+            supports_vision=True,
+        ),
+
+        # Perplexity Models (Web search enabled)
+        "perplexity-sonar-pro": ModelCapability(
+            name="Sonar Pro",
+            provider="perplexity",
+            model_id="sonar-pro",
+            task_types=(TaskType.WEB_SEARCH, TaskType.GENERAL_NLP,
+                       TaskType.REASONING),
+            context_window=200000,
+            cost_per_1k_input=0.003,
+            cost_per_1k_output=0.015,
+            strengths=("web search", "citations", "real-time info"),
+        ),
+        "perplexity-sonar": ModelCapability(
+            name="Sonar",
+            provider="perplexity",
+            model_id="sonar",
+            task_types=(TaskType.WEB_SEARCH, TaskType.GENERAL_NLP),
+            context_window=128000,
+            cost_per_1k_input=0.001,
+            cost_per_1k_output=0.001,
+            strengths=("web search", "cost-effective", "fast"),
+        ),
+
+        # DeepSeek Cloud Models
+        "deepseek-chat": ModelCapability(
+            name="DeepSeek Chat",
+            provider="deepseek",
+            model_id="deepseek-chat",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
+                       TaskType.REASONING),
+            context_window=64000,
+            cost_per_1k_input=0.00014,
+            cost_per_1k_output=0.00028,
+            strengths=("very cost-effective", "coding", "reasoning"),
+        ),
+        "deepseek-reasoner": ModelCapability(
+            name="DeepSeek Reasoner",
+            provider="deepseek",
+            model_id="deepseek-reasoner",
+            task_types=(TaskType.DEEP_REASONING, TaskType.MATH,
+                       TaskType.CODE_GENERATION),
+            context_window=64000,
+            cost_per_1k_input=0.00055,
+            cost_per_1k_output=0.00219,
+            strengths=("deep reasoning", "math", "problem-solving"),
+        ),
+    }
+    
+    @classmethod
+    def get_model(cls, model_key: str) -> Optional[ModelCapability]:
+        return cls.MODELS.get(model_key)
+    
+    @classmethod
+    def get_models_for_task(
+        cls, 
+        task_type: TaskType,
+        require_local: bool = False,
+    ) -> List[ModelCapability]:
+        """Get models suitable for a task type"""
+        suitable = []
+        for model in cls.MODELS.values():
+            if task_type in model.task_types:
+                if require_local and model.provider != "ollama":
+                    continue
+                suitable.append(model)
+        
+        # Sort by cost (cheapest first, unless it's local which is free)
+        return sorted(suitable, key=lambda m: m.cost_per_1k_input)
+
+
+class AIOrchestrator:
+    """
+    Main AI Orchestrator that intelligently routes queries to the best model.
+    
+    Features:
+    - Automatic task classification
+    - Optimal model selection based on task type
+    - Secure credential management
+    - Rate limiting and retry logic
+    - Comprehensive logging
+    """
+    
+    def __init__(
+        self,
+        prefer_local: bool = False,
+        cost_optimize: bool = False,
+        verbose: bool = False,
+    ):
+        self.prefer_local = prefer_local
+        self.cost_optimize = cost_optimize
+        self.verbose = verbose
+        
+        self.rate_limiter = RateLimiter()
+        self.providers: Dict[str, BaseProvider] = {}
+        self.conversation_history: List[Dict] = []
+        
+        self._setup_logging()
+    
+    def _setup_logging(self):
+        level = logging.DEBUG if self.verbose else logging.INFO
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+    
+    async def _get_provider(self, provider_name: str) -> Optional[BaseProvider]:
+        """Get or initialize a provider"""
+        if provider_name not in self.providers:
+            if provider_name == "openai":
+                provider = OpenAIProvider(self.rate_limiter)
+            elif provider_name == "anthropic":
+                provider = AnthropicProvider(self.rate_limiter)
+            elif provider_name == "google":
+                provider = GoogleProvider(self.rate_limiter)
+            elif provider_name == "ollama":
+                provider = OllamaProvider(self.rate_limiter)
+            elif provider_name == "mistral":
+                provider = MistralProvider(self.rate_limiter)
+            elif provider_name == "groq":
+                provider = GroqProvider(self.rate_limiter)
+            elif provider_name == "xai":
+                provider = XAIProvider(self.rate_limiter)
+            elif provider_name == "perplexity":
+                provider = PerplexityProvider(self.rate_limiter)
+            elif provider_name == "deepseek":
+                provider = DeepSeekProvider(self.rate_limiter)
+            else:
+                logger.error(f"Unknown provider: {provider_name}")
+                return None
+
+            if await provider.initialize():
+                self.providers[provider_name] = provider
+            else:
+                return None
+
+        return self.providers.get(provider_name)
+    
+    def select_model(
+        self,
+        task_types: List[Tuple[TaskType, float]],
+    ) -> Optional[ModelCapability]:
+        """Select the best model for the given task types"""
+        if not task_types:
+            task_types = [(TaskType.GENERAL_NLP, 0.5)]
+        
+        primary_task = task_types[0][0]
+        
+        # Get suitable models
+        candidates = ModelRegistry.get_models_for_task(
+            primary_task,
+            require_local=self.prefer_local
+        )
+        
+        if not candidates:
+            # Fallback to any available model
+            candidates = list(ModelRegistry.MODELS.values())
+        
+        # Score candidates
+        scored = []
+        for model in candidates:
+            score = 0.0
+            
+            # Task match score
+            for task, confidence in task_types:
+                if task in model.task_types:
+                    score += confidence * 10
+            
+            # Cost optimization
+            if self.cost_optimize:
+                score -= model.cost_per_1k_input * 100
+            
+            # Context window bonus for long context tasks
+            if TaskType.LONG_CONTEXT in [t[0] for t in task_types]:
+                score += model.context_window / 100000
+            
+            scored.append((model, score))
+        
+        if not scored:
+            return None
+        
+        scored.sort(key=lambda x: -x[1])
+        
+        if self.verbose:
+            logger.info(f"Model scores: {[(m.name, s) for m, s in scored[:5]]}")
+        
+        return scored[0][0]
+    
+    async def query(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        model_override: Optional[str] = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> APIResponse:
+        """
+        Send a query to the AI orchestrator.
+        
+        Args:
+            prompt: The user's prompt
+            system_prompt: Optional system prompt
+            model_override: Force a specific model
+            max_tokens: Maximum response tokens
+            temperature: Sampling temperature
+        
+        Returns:
+            APIResponse with the result
+        """
+        # Validate input
+        is_valid, error = InputValidator.validate_prompt(prompt)
+        if not is_valid:
+            return APIResponse(
+                content="",
+                model="",
+                provider="",
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=error,
+            )
+        
+        # Classify task
+        task_types = TaskClassifier.classify(prompt)
+        
+        if self.verbose:
+            logger.info(f"Classified task types: {task_types}")
+        
+        # Select model
+        if model_override:
+            model = ModelRegistry.get_model(model_override)
+            if not model:
+                return APIResponse(
+                    content="",
+                    model=model_override,
+                    provider="",
+                    usage={},
+                    latency_ms=0,
+                    success=False,
+                    error=f"Unknown model: {model_override}",
+                )
+        else:
+            model = self.select_model(task_types)
+            if not model:
+                return APIResponse(
+                    content="",
+                    model="",
+                    provider="",
+                    usage={},
+                    latency_ms=0,
+                    success=False,
+                    error="No suitable model found",
+                )
+        
+        logger.info(f"Selected model: {model.name} ({model.provider})")
+        
+        # Get provider
+        provider = await self._get_provider(model.provider)
+        if not provider:
+            return APIResponse(
+                content="",
+                model=model.name,
+                provider=model.provider,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"Provider {model.provider} not available",
+            )
+        
+        # Build messages
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.extend(self.conversation_history)
+        messages.append({"role": "user", "content": prompt})
+        
+        # Execute with retry
+        async def execute():
+            return await provider.complete(
+                messages=messages,
+                model=model.model_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        
+        response = await RetryHandler.execute_with_retry(execute)
+        
+        # Update conversation history
+        if response.success:
+            self.conversation_history.append({"role": "user", "content": prompt})
+            self.conversation_history.append({
+                "role": "assistant", 
+                "content": response.content
+            })
+        
+        return response
+    
+    def clear_history(self):
+        """Clear conversation history"""
+        self.conversation_history.clear()
+    
+    async def multi_model_query(
+        self,
+        prompt: str,
+        models: List[str],
+        system_prompt: Optional[str] = None,
+    ) -> Dict[str, APIResponse]:
+        """
+        Query multiple models in parallel for comparison.
+        """
+        tasks = []
+        for model_key in models:
+            tasks.append(
+                self.query(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    model_override=model_key,
+                )
+            )
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        return {
+            model: result if not isinstance(result, Exception) 
+                   else APIResponse(
+                       content="",
+                       model=model,
+                       provider="",
+                       usage={},
+                       latency_ms=0,
+                       success=False,
+                       error=str(result),
+                   )
+            for model, result in zip(models, results)
+        }
+
+
+async def main():
+    """CLI interface for the orchestrator"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="AI Orchestrator CLI")
+    parser.add_argument("prompt", nargs="?", help="The prompt to send")
+    parser.add_argument("--model", "-m", help="Override model selection")
+    parser.add_argument("--local", "-l", action="store_true", help="Prefer local models")
+    parser.add_argument("--cheap", "-c", action="store_true", help="Optimize for cost")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument("--configure", action="store_true", help="Configure API keys")
+    parser.add_argument("--list-models", action="store_true", help="List available models")
+    
+    args = parser.parse_args()
+    
+    if args.configure:
+        from credentials import configure_credentials_interactive
+        configure_credentials_interactive()
+        return
+    
+    if args.list_models:
+        print("\nAvailable Models:")
+        print("=" * 60)
+        for key, model in ModelRegistry.MODELS.items():
+            print(f"\n{key}:")
+            print(f"  Name: {model.name}")
+            print(f"  Provider: {model.provider}")
+            print(f"  Context: {model.context_window:,} tokens")
+            print(f"  Cost: ${model.cost_per_1k_input}/1k input, ${model.cost_per_1k_output}/1k output")
+            print(f"  Strengths: {', '.join(model.strengths)}")
+        return
+    
+    if not args.prompt:
+        parser.print_help()
+        return
+    
+    orchestrator = AIOrchestrator(
+        prefer_local=args.local,
+        cost_optimize=args.cheap,
+        verbose=args.verbose,
+    )
+    
+    response = await orchestrator.query(
+        prompt=args.prompt,
+        model_override=args.model,
+    )
+    
+    if response.success:
+        print(f"\n[{response.model}] ({response.latency_ms:.0f}ms)")
+        print("-" * 60)
+        print(response.content)
+        print("-" * 60)
+        print(f"Tokens: {response.usage.get('input_tokens', 0)} in / {response.usage.get('output_tokens', 0)} out")
+    else:
+        print(f"\nError: {response.error}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

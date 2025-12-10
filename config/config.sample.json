@@ -1,0 +1,103 @@
+{
+  "$schema": "./config-schema.json",
+  "version": "2.0.0",
+  
+  "_comment": "⚠️ SECURITY: NEVER store API keys in this file! Use the credential manager instead.",
+  
+  "defaults": {
+    "preferLocal": false,
+    "costOptimize": false,
+    "maxTokens": 4096,
+    "temperature": 0.7,
+    "timeout": 120
+  },
+  
+  "models": {
+    "claude-opus-4.5": {
+      "enabled": true,
+      "priority": 90
+    },
+    "claude-sonnet-4.5": {
+      "enabled": true,
+      "priority": 80
+    },
+    "gpt-4o": {
+      "enabled": true,
+      "priority": 75
+    },
+    "o1": {
+      "enabled": true,
+      "priority": 85
+    },
+    "gemini-2.0-flash": {
+      "enabled": true,
+      "priority": 70
+    },
+    "llama3.2": {
+      "enabled": true,
+      "priority": 50
+    },
+    "deepseek-coder-v2": {
+      "enabled": true,
+      "priority": 60
+    }
+  },
+  
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434",
+      "models": [
+        "llama3.2",
+        "codellama",
+        "deepseek-coder-v2",
+        "mistral"
+      ]
+    },
+    "openai": {
+      "organization": "",
+      "baseUrl": "https://api.openai.com/v1"
+    },
+    "anthropic": {
+      "baseUrl": "https://api.anthropic.com"
+    }
+  },
+  
+  "rateLimits": {
+    "openai": {
+      "requestsPerMinute": 60,
+      "tokensPerMinute": 150000
+    },
+    "anthropic": {
+      "requestsPerMinute": 60,
+      "tokensPerMinute": 100000
+    },
+    "google": {
+      "requestsPerMinute": 60,
+      "tokensPerMinute": 120000
+    },
+    "ollama": {
+      "requestsPerMinute": 120,
+      "tokensPerMinute": 500000
+    }
+  },
+  
+  "logging": {
+    "level": "INFO",
+    "redactSensitive": true
+  },
+  
+  "security": {
+    "maxPromptLength": 500000,
+    "maxMessages": 100,
+    "allowRemoteExecution": false
+  },
+  
+  "taskRouting": {
+    "code": ["claude-sonnet-4.5", "deepseek-coder-v2", "gpt-4o"],
+    "reasoning": ["o1", "claude-opus-4.5"],
+    "creative": ["claude-opus-4.5", "gpt-4o"],
+    "summarization": ["claude-haiku-4.5", "gpt-4o-mini"],
+    "local": ["llama3.2", "deepseek-coder-v2"],
+    "long-context": ["gemini-1.5-pro", "claude-opus-4.5"]
+  }
+}

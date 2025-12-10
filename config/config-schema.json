@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/jasonvassallo/ai-orchestrator/config-schema.json",
+  "title": "AI Orchestrator Configuration",
+  "description": "Configuration schema for the AI Orchestrator. API keys should NEVER be stored in this file - use the secure credential manager instead.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Configuration schema version",
+      "const": "2.0.0"
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Default settings for the orchestrator",
+      "properties": {
+        "preferLocal": {
+          "type": "boolean",
+          "description": "Prefer local models (Ollama) for privacy",
+          "default": false
+        },
+        "costOptimize": {
+          "type": "boolean",
+          "description": "Optimize for lower cost models when possible",
+          "default": false
+        },
+        "maxTokens": {
+          "type": "integer",
+          "description": "Default maximum tokens in response",
+          "minimum": 100,
+          "maximum": 100000,
+          "default": 4096
+        },
+        "temperature": {
+          "type": "number",
+          "description": "Default temperature for response generation",
+          "minimum": 0,
+          "maximum": 2,
+          "default": 0.7
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Request timeout in seconds",
+          "minimum": 10,
+          "maximum": 600,
+          "default": 120
+        }
+      }
+    },
+    "models": {
+      "type": "object",
+      "description": "Model configuration overrides",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Whether this model is enabled",
+            "default": true
+          },
+          "priority": {
+            "type": "integer",
+            "description": "Priority for model selection (higher = preferred)",
+            "minimum": 0,
+            "maximum": 100,
+            "default": 50
+          },
+          "maxTokens": {
+            "type": "integer",
+            "description": "Override max tokens for this model"
+          },
+          "temperature": {
+            "type": "number",
+            "description": "Override temperature for this model"
+          }
+        }
+      }
+    },
+    "providers": {
+      "type": "object",
+      "description": "Provider-specific configuration (NOT for API keys!)",
+      "properties": {
+        "ollama": {
+          "type": "object",
+          "properties": {
+            "baseUrl": {
+              "type": "string",
+              "description": "Ollama server base URL",
+              "default": "http://localhost:11434"
+            },
+            "models": {
+              "type": "array",
+              "description": "List of available Ollama models",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "openai": {
+          "type": "object",
+          "properties": {
+            "organization": {
+              "type": "string",
+              "description": "OpenAI organization ID (optional)"
+            },
+            "baseUrl": {
+              "type": "string",
+              "description": "Custom API base URL (for proxies or Azure)",
+              "default": "https://api.openai.com/v1"
+            }
+          }
+        },
+        "anthropic": {
+          "type": "object",
+          "properties": {
+            "baseUrl": {
+              "type": "string",
+              "description": "Custom API base URL",
+              "default": "https://api.anthropic.com"
+            }
+          }
+        }
+      }
+    },
+    "rateLimits": {
+      "type": "object",
+      "description": "Rate limiting configuration per provider",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "requestsPerMinute": {
+            "type": "integer",
+            "description": "Maximum requests per minute",
+            "minimum": 1,
+            "default": 60
+          },
+          "tokensPerMinute": {
+            "type": "integer",
+            "description": "Maximum tokens per minute",
+            "minimum": 1000,
+            "default": 100000
+          }
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "description": "Logging configuration",
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": ["DEBUG", "INFO", "WARNING", "ERROR"],
+          "default": "INFO"
+        },
+        "file": {
+          "type": "string",
+          "description": "Log file path (optional, logs to console if not set)"
+        },
+        "redactSensitive": {
+          "type": "boolean",
+          "description": "Redact potentially sensitive content in logs",
+          "default": true
+        }
+      }
+    },
+    "security": {
+      "type": "object",
+      "description": "Security settings",
+      "properties": {
+        "maxPromptLength": {
+          "type": "integer",
+          "description": "Maximum allowed prompt length in characters",
+          "minimum": 1000,
+          "maximum": 1000000,
+          "default": 500000
+        },
+        "maxMessages": {
+          "type": "integer",
+          "description": "Maximum messages in conversation history",
+          "minimum": 10,
+          "maximum": 1000,
+          "default": 100
+        },
+        "allowRemoteExecution": {
+          "type": "boolean",
+          "description": "Allow code execution features (use with caution)",
+          "default": false
+        }
+      }
+    },
+    "taskRouting": {
+      "type": "object",
+      "description": "Custom task type to model mapping",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "description": "List of model keys to use for this task type"
+      }
+    }
+  },
+  "required": ["version"]
+}

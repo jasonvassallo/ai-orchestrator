@@ -1,0 +1,199 @@
+{
+  "name": "ai-orchestrator",
+  "displayName": "AI Orchestrator",
+  "description": "Intelligent multi-model AI assistant that automatically routes queries to the best AI model",
+  "version": "2.0.0",
+  "publisher": "ai-orchestrator",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "chatgpt",
+    "claude",
+    "gemini",
+    "openai",
+    "anthropic",
+    "ollama",
+    "llm",
+    "assistant"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jasonvassallo/ai-orchestrator"
+  },
+  "icon": "images/icon.png",
+  "activationEvents": [],
+  "main": "./src/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ai-orchestrator.query",
+        "title": "AI Orchestrator: Ask AI",
+        "category": "AI Orchestrator"
+      },
+      {
+        "command": "ai-orchestrator.configureCredentials",
+        "title": "AI Orchestrator: Configure API Credentials",
+        "category": "AI Orchestrator"
+      },
+      {
+        "command": "ai-orchestrator.selectModel",
+        "title": "AI Orchestrator: Select Model",
+        "category": "AI Orchestrator"
+      },
+      {
+        "command": "ai-orchestrator.clearHistory",
+        "title": "AI Orchestrator: Clear Conversation History",
+        "category": "AI Orchestrator"
+      },
+      {
+        "command": "ai-orchestrator.explainCode",
+        "title": "AI Orchestrator: Explain Selected Code",
+        "category": "AI Orchestrator"
+      },
+      {
+        "command": "ai-orchestrator.improveCode",
+        "title": "AI Orchestrator: Improve Selected Code",
+        "category": "AI Orchestrator"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "when": "editorHasSelection",
+          "command": "ai-orchestrator.explainCode",
+          "group": "ai-orchestrator@1"
+        },
+        {
+          "when": "editorHasSelection",
+          "command": "ai-orchestrator.improveCode",
+          "group": "ai-orchestrator@2"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "ai-orchestrator.query",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "ai-orchestrator.explainCode",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "title": "AI Orchestrator",
+      "properties": {
+        "ai-orchestrator.selectedModel": {
+          "type": "string",
+          "default": "",
+          "description": "Override automatic model selection with a specific model",
+          "enum": [
+            "",
+            "gpt-4o",
+            "gpt-4o-mini",
+            "o1",
+            "o1-mini",
+            "claude-opus-4.5",
+            "claude-sonnet-4.5",
+            "claude-haiku-4.5",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
+            "mistral-large",
+            "codestral",
+            "groq-llama-3.3-70b",
+            "grok-2",
+            "perplexity-sonar-pro",
+            "deepseek-chat",
+            "deepseek-reasoner",
+            "llama3.2",
+            "deepseek-coder-v2"
+          ],
+          "enumDescriptions": [
+            "Automatic (let orchestrator choose)",
+            "GPT-4o - Fast, multimodal, general purpose",
+            "GPT-4o Mini - Cost-effective for simple tasks",
+            "o1 - Deep reasoning and complex problems",
+            "o1-mini - Balanced reasoning model",
+            "Claude Opus 4.5 - Most intelligent, best for complex tasks",
+            "Claude Sonnet 4.5 - Balanced performance, great for coding",
+            "Claude Haiku 4.5 - Very fast and cost-effective",
+            "Gemini 2.0 Flash - Massive context, fast",
+            "Gemini 1.5 Pro - 2M context window",
+            "Mistral Large - Multilingual, function calling",
+            "Codestral - Specialized coding model",
+            "Llama 3.3 70B (Groq) - Ultra-fast inference",
+            "Grok 2 - Real-time knowledge, creative",
+            "Sonar Pro - Web search with citations",
+            "DeepSeek Chat - Very cost-effective",
+            "DeepSeek Reasoner - Deep reasoning, math",
+            "Llama 3.2 - Free local model",
+            "DeepSeek Coder V2 - Excellent coding, free local"
+          ]
+        },
+        "ai-orchestrator.preferLocal": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prefer local models (Ollama) for privacy"
+        },
+        "ai-orchestrator.costOptimize": {
+          "type": "boolean",
+          "default": false,
+          "description": "Optimize for lower cost models when possible"
+        },
+        "ai-orchestrator.maxTokens": {
+          "type": "number",
+          "default": 4096,
+          "minimum": 100,
+          "maximum": 100000,
+          "description": "Maximum tokens in response"
+        },
+        "ai-orchestrator.temperature": {
+          "type": "number",
+          "default": 0.7,
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Temperature for response generation (0=deterministic, 2=creative)"
+        },
+        "ai-orchestrator.systemPrompt": {
+          "type": "string",
+          "default": "",
+          "description": "Custom system prompt to use for all queries"
+        },
+        "ai-orchestrator.ollamaBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Base URL for Ollama server"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "test": "node ./test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/test-electron": "^2.3.8",
+    "@vscode/vsce": "^2.22.0",
+    "eslint": "^8.55.0"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  }
+}
