@@ -1,0 +1,18 @@
+# AI Orchestrator Requirements
+# ============================
+# Install with: pip install -r requirements.txt
+#
+# For development: pip install -r requirements.txt -r requirements-dev.txt
+# Or use: pip install -e ".[all,dev]"
+
+# Core HTTP client
+httpx>=0.25.0
+
+# AI Provider SDKs (optional - install based on which providers you use)
+openai>=1.0.0
+anthropic>=0.18.0
+google-generativeai>=0.3.0
+
+# Secure credential storage
+cryptography>=41.0.0
+keyring>=24.0.0
