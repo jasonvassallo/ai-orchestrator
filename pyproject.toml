@@ -47,8 +47,29 @@ secure = [
     "cryptography>=41.0.0",
     "keyring>=24.0.0",
 ]
+# GUI application (native Mac app)
+gui = [
+    "PySide6>=6.6.0",
+    "qasync>=0.24.0",
+    "pygments>=2.17.0",
+    "markdown>=3.5.0",
+]
+# Terminal UI (beautiful CLI)
+tui = [
+    "textual>=0.47.0",
+    "rich>=13.7.0",
+]
+# Menu bar app (macOS only)
+menubar = [
+    "rumps>=0.4.0",
+]
+# All UI options
+ui = [
+    "ai-orchestrator[gui,tui,menubar]",
+]
+# All features
 all = [
-    "ai-orchestrator[openai,anthropic,google,cohere,secure]",
+    "ai-orchestrator[openai,anthropic,google,cohere,secure,ui]",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -58,11 +79,15 @@ dev = [
     "black>=23.0.0",
     "ruff>=0.1.0",
     "pre-commit>=3.0.0",
+    "py2app>=0.28.0",
 ]
 
 [project.scripts]
 ai-orchestrator = "src.orchestrator:main"
 ai-configure = "src.credentials:configure_credentials_interactive"
+ai-app = "src.gui.app:main"
+ai-chat = "src.tui.app:main"
+ai-menubar = "src.menubar.app:main"
 
 [project.urls]
 Homepage = "https://github.com/jasonvassallo/ai-orchestrator"

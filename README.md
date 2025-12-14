@@ -10,6 +10,9 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 
 ## Features
 
+- **Native Mac App**: Beautiful ChatGPT-like desktop application
+- **Menu Bar App**: Quick access from your Mac's menu bar
+- **Terminal UI**: Gorgeous terminal-based interface
 - **Intelligent Routing**: Automatically selects the best model based on task classification
 - **Secure Credentials**: API keys stored in OS keychain or encrypted file - NEVER in code
 - **High Performance**: Async operations, rate limiting, and retry logic with exponential backoff
@@ -18,6 +21,8 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 - **Local Models**: Privacy-first option with Ollama support
 - **Cost Optimization**: Route to cheaper models when appropriate
 - **Web Search**: Perplexity integration for real-time information
+- **Image Generation**: DALL-E integration for creating images
+- **Music Generation**: Create MIDI and audio files with AI (separate drums/bass/chords tracks, 90s tech-house patterns)
 
 ## Quick Start
 
@@ -28,12 +33,15 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 git clone https://github.com/jasonvassallo/ai-orchestrator.git
 cd ai-orchestrator
 
-# Install with all providers
+# Install with all providers and GUI apps
 pip install -e ".[all]"
 
-# Or install minimal + specific providers
-pip install -e "."
-pip install -e ".[openai,anthropic]"
+# Or install specific components
+pip install -e "."                      # Minimal (CLI only)
+pip install -e ".[openai,anthropic]"    # Specific providers
+pip install -e ".[gui]"                 # Native Mac app
+pip install -e ".[tui]"                 # Terminal UI
+pip install -e ".[ui]"                  # All UI options
 ```
 
 ### Configure Credentials (REQUIRED)
@@ -110,6 +118,69 @@ async def main():
         print(f"\n{model}:\n{resp.content[:200]}...")
 
 asyncio.run(main())
+```
+
+## Mac Applications
+
+AI Orchestrator includes three beautiful interface options:
+
+### Native Mac App (ChatGPT-like)
+
+A full-featured desktop application with:
+- Conversation history sidebar
+- Model selector dropdown
+- Feature toggles (Think, Web, Research, Image, Music)
+- Streaming responses
+- Markdown rendering with syntax highlighting
+
+```bash
+# Run the GUI app
+ai-app
+# or
+python -m src.gui.app
+```
+
+### Menu Bar App
+
+Quick access from your Mac's menu bar:
+- Always accessible
+- Quick query popup
+- Model switching
+- Launch other apps
+
+```bash
+# Run the menu bar app
+ai-menubar
+# or
+python -m src.menubar.app
+```
+
+### Terminal UI
+
+Beautiful terminal-based interface:
+- Modern, stylish design
+- Keyboard-driven
+- Works over SSH
+
+```bash
+# Run the terminal UI
+ai-chat
+# or
+python -m src.tui.app
+```
+
+### Building the .app Bundle
+
+Create a standalone macOS application:
+
+```bash
+# Install build dependencies
+pip install -e ".[dev]"
+
+# Build the .app bundle
+python setup_app.py py2app
+
+# Output: dist/AI Orchestrator.app
 ```
 
 ## Supported Models (25+)
@@ -236,6 +307,46 @@ All API calls are logged with:
 - Latency
 - Success/failure status
 
+## Music Generation
+
+AI Orchestrator includes a powerful music generation module optimized for electronic music production:
+
+### Features
+
+- **Separate MIDI Tracks**: Generates individual files for drums, bass, and chords
+- **Combined MIDI**: Full arrangement with all tracks in one file
+- **90s Tech-House Patterns**: Authentic patterns with:
+  - Syncopated kicks (4-on-the-floor with groove)
+  - Offbeat open hi-hats
+  - Minor chord progressions with 7ths
+  - Default 124-128 BPM range
+- **AI Audio Generation**: MusicGen integration for audio file creation
+
+### Usage
+
+In the GUI app, click the **Music** toggle and configure:
+- Key signature (default: G Minor)
+- BPM (default: 124-128 for tech house)
+- Genre/style
+- Energy level
+- Duration
+
+Generated files are saved to `~/Music/AI Orchestrator/` and can be opened in:
+- Logic Pro
+- Ableton Live
+- GarageBand
+- Any DAW that supports MIDI
+
+### Dependencies
+
+```bash
+# For MIDI generation
+pip install midiutil
+
+# For AI audio generation (optional)
+pip install torch transformers scipy
+```
+
 ## Configuration
 
 Copy `config/config.sample.json` to `~/.ai_orchestrator/config.json`:
@@ -313,7 +424,20 @@ ai-orchestrator/
 ├── src/
 │   ├── __init__.py
 │   ├── orchestrator.py    # Main orchestrator logic (25+ models, 9 providers)
-│   └── credentials.py     # Secure credential management
+│   ├── credentials.py     # Secure credential management
+│   ├── storage.py         # Conversation storage (SQLite)
+│   ├── music.py           # Music generation (MIDI + MusicGen audio)
+│   ├── gui/               # Native Mac GUI app (PySide6)
+│   │   ├── app.py         # Main entry point
+│   │   ├── main_window.py # Primary window
+│   │   ├── chat_widget.py # Chat display
+│   │   ├── input_widget.py# Input area with toggles
+│   │   ├── sidebar.py     # Conversation history
+│   │   └── styles.py      # macOS styling
+│   ├── tui/               # Terminal UI (Textual)
+│   │   └── app.py         # Terminal interface
+│   └── menubar/           # Menu bar app (rumps)
+│       └── app.py         # Menu bar interface
 ├── config/
 │   ├── config-schema.json # JSON schema for config
 │   └── config.sample.json # Sample configuration
@@ -324,6 +448,7 @@ ai-orchestrator/
 │   ├── src/
 │   │   └── extension.js   # VS Code extension
 │   └── package.json
+├── setup_app.py           # py2app build script
 ├── pyproject.toml         # Python project config
 ├── LICENSE                # MIT License
 └── README.md

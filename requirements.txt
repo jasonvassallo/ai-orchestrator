@@ -16,3 +16,16 @@ google-generativeai>=0.3.0
 # Secure credential storage
 cryptography>=41.0.0
 keyring>=24.0.0
+
+# GUI Application (native Mac app)
+PySide6>=6.6.0
+qasync>=0.24.0
+pygments>=2.17.0
+markdown>=3.5.0
+
+# Terminal UI (beautiful CLI)
+textual>=0.47.0
+rich>=13.7.0
+
+# Menu bar app (macOS only)
+rumps>=0.4.0
