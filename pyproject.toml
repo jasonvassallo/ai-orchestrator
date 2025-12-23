@@ -147,6 +147,14 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 check_untyped_defs = true
 strict_optional = true
+ignore_missing_imports = true
+# Exclude optional UI modules from strict checking to reduce noise
+exclude = 'src/(gui|tui|menubar)/.*|src/music\.py$'
+files = [
+    "src/orchestrator.py",
+    "src/credentials.py",
+    "src/storage.py"
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

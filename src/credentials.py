@@ -19,6 +19,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 # Cryptography imports with fallback
 try:
@@ -145,7 +146,7 @@ class KeyringBackend(CredentialBackend):
 class EncryptedFileBackend(CredentialBackend):
     """Encrypted file storage using machine-specific key derivation"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._fernet: Fernet | None = None
         self._init_encryption()
 
@@ -189,7 +190,7 @@ class EncryptedFileBackend(CredentialBackend):
         combined = ":".join(identifiers)
         return hashlib.sha256(combined.encode()).digest()
 
-    def _init_encryption(self):
+    def _init_encryption(self) -> None:
         """Initialize Fernet encryption with machine-specific key"""
         if not CRYPTO_AVAILABLE:
             return
@@ -220,8 +221,12 @@ class EncryptedFileBackend(CredentialBackend):
         try:
             with open(ENCRYPTED_CREDS_FILE, "rb") as f:
                 encrypted = f.read()
-            decrypted = self._fernet.decrypt(encrypted)
-            return json.loads(decrypted.decode())
+            fernet = self._fernet
+            assert fernet is not None
+            decrypted = fernet.decrypt(encrypted)
+            loaded: dict[str, Any] = json.loads(decrypted.decode())
+            # Ensure we always return a mapping of strings to strings
+            return {str(k): str(v) for k, v in loaded.items()}
         except Exception as e:
             logger.error(f"Failed to load credentials: {e}")
             return {}
@@ -232,7 +237,9 @@ class EncryptedFileBackend(CredentialBackend):
             return False
 
         try:
-            encrypted = self._fernet.encrypt(json.dumps(creds).encode())
+            fernet = self._fernet
+            assert fernet is not None
+            encrypted = fernet.encrypt(json.dumps(creds).encode())
 
             # Write atomically with restricted permissions
             temp_file = ENCRYPTED_CREDS_FILE.with_suffix(".tmp")
@@ -324,7 +331,7 @@ class CredentialManager:
     3. Environment variables (fallback)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._backends = [
             KeyringBackend(),
             EncryptedFileBackend(),
@@ -333,7 +340,7 @@ class CredentialManager:
         self._cache: dict[str, APICredential] = {}
         self._validate_security()
 
-    def _validate_security(self):
+    def _validate_security(self) -> None:
         """Log security posture on initialization"""
         available = [
             type(b).__name__ for b in self._backends if b.is_available
@@ -423,7 +430,7 @@ class CredentialManager:
         cred = self.get_credential(provider)
         return cred.get_key() if cred else None
 
-    def clear_cache(self):
+    def clear_cache(self) -> None:
         """Clear the credential cache"""
         self._cache.clear()
 
@@ -451,7 +458,7 @@ def set_api_key(provider: str, api_key: str) -> bool:
     return get_credential_manager().set_credential(provider, api_key)
 
 
-def configure_credentials_interactive():
+def configure_credentials_interactive() -> None:
     """Interactive CLI for configuring API credentials"""
     print("\n🔐 AI Orchestrator Credential Configuration\n")
     print("=" * 50)

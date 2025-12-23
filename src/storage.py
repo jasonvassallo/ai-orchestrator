@@ -368,7 +368,7 @@ class ConversationStorage:
             row = cursor.fetchone()
             if row:
                 # Truncate for preview
-                content = row[0]
+                content = str(row[0])
                 return content[:100] + "..." if len(content) > 100 else content
             return None
 

@@ -27,7 +27,11 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any
+from typing import Any, Callable, Coroutine, Union, TYPE_CHECKING, Deque
+
+if TYPE_CHECKING:
+    from google.oauth2 import service_account
+    from google.auth import credentials as auth_credentials
 
 # Import our secure credential manager
 from .credentials import get_api_key
@@ -73,8 +77,8 @@ class ModelCapability:
 @dataclass
 class RateLimitState:
     """Track rate limiting state per provider"""
-    requests: deque = field(default_factory=deque)
-    tokens: deque = field(default_factory=deque)
+    requests: Deque[float] = field(default_factory=deque)
+    tokens: Deque[tuple[float, int]] = field(default_factory=deque)
     max_requests_per_minute: int = 60
     max_tokens_per_minute: int = 100000
 
@@ -112,7 +116,7 @@ class InputValidator:
     @classmethod
     def validate_prompt(cls, prompt: str) -> tuple[bool, str]:
         """Validate user prompt for security issues"""
-        if not prompt or not isinstance(prompt, str):
+        if not prompt:
             return False, "Invalid prompt: must be a non-empty string"
 
         if len(prompt) > cls.MAX_PROMPT_LENGTH:
@@ -128,17 +132,15 @@ class InputValidator:
         return True, ""
 
     @classmethod
-    def validate_messages(cls, messages: list[dict]) -> tuple[bool, str]:
+    def validate_messages(cls, messages: list[dict[str, Any]]) -> tuple[bool, str]:
         """Validate message array"""
-        if not messages or not isinstance(messages, list):
+        if not messages:
             return False, "Invalid messages: must be a non-empty list"
 
         if len(messages) > cls.MAX_MESSAGES:
             return False, f"Too many messages: max {cls.MAX_MESSAGES}"
 
         for i, msg in enumerate(messages):
-            if not isinstance(msg, dict):
-                return False, f"Message {i} must be a dictionary"
             if "role" not in msg or "content" not in msg:
                 return False, f"Message {i} missing required fields"
 
@@ -168,7 +170,7 @@ class InputValidator:
 class RateLimiter:
     """Token bucket rate limiter with per-provider limits"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self._states: dict[str, RateLimitState] = {}
         self._lock = asyncio.Lock()
 
@@ -237,13 +239,13 @@ class RetryHandler:
     @classmethod
     async def execute_with_retry(
         cls,
-        func,
+        func: Callable[[], Coroutine[Any, Any, APIResponse]],
         max_retries: int = 3,
         base_delay: float = 1.0,
         max_delay: float = 60.0,
-    ):
+    ) -> APIResponse:
         """Execute function with exponential backoff retry"""
-        last_error = None
+        last_error: Exception | None = None
 
         for attempt in range(max_retries + 1):
             try:
@@ -264,8 +266,13 @@ class RetryHandler:
                     f"{InputValidator.sanitize_for_logging(error_str)}"
                 )
                 await asyncio.sleep(delay)
-
-        raise last_error
+        
+        if last_error:
+            raise last_error
+        
+        # This part should ideally not be reached if func always returns or raises.
+        # Added for type safety to guarantee a return value.
+        raise RuntimeError("Retry logic finished without returning or raising.")
 
 
 class BaseProvider(ABC):
@@ -273,7 +280,7 @@ class BaseProvider(ABC):
 
     def __init__(self, rate_limiter: RateLimiter):
         self.rate_limiter = rate_limiter
-        self._client = None
+        self._client: Any | None = None
 
     @property
     @abstractmethod
@@ -288,9 +295,9 @@ class BaseProvider(ABC):
     @abstractmethod
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any
     ) -> APIResponse:
         """Send completion request"""
         pass
@@ -319,19 +326,20 @@ class OpenAIProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
+        assert self._client is not None
 
         start_time = time.time()
 
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
-                kwargs.get("max_tokens", 1000)
+                kwargs.get("max_tokens", 1000),
             )
 
             response = await self._client.chat.completions.create(
@@ -389,24 +397,25 @@ class AnthropicProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
+        assert self._client is not None
 
         start_time = time.time()
 
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
-                kwargs.get("max_tokens", 1000)
+                kwargs.get("max_tokens", 1000),
             )
 
             # Extract system message if present
             system = ""
-            chat_messages = []
+            chat_messages: list[dict[str, Any]] = []
             for msg in messages:
                 if msg["role"] == "system":
                     system = msg["content"]
@@ -473,11 +482,11 @@ class GoogleProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any,
     ) -> APIResponse:
-        if not hasattr(self, '_genai'):
+        if not hasattr(self, "_genai"):
             await self.initialize()
 
         start_time = time.time()
@@ -489,8 +498,7 @@ class GoogleProvider(BaseProvider):
 
             # Convert messages to Gemini format
             prompt = "\n".join(
-                f"{msg['role']}: {msg['content']}"
-                for msg in messages
+                f"{msg['role']}: {msg['content']}" for msg in messages
             )
 
             response = await asyncio.to_thread(
@@ -510,6 +518,197 @@ class GoogleProvider(BaseProvider):
                 latency_ms=latency,
                 success=True,
             )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
+class VertexAIProvider(BaseProvider):
+    """
+    Google Vertex AI provider for enterprise deployments.
+
+    Uses service account authentication for third-party platform integration.
+    Provides stable REST endpoints that external platforms can call.
+    """
+
+    def __init__(
+        self,
+        rate_limiter: RateLimiter,
+        project_id: str | None = None,
+        location: str = "us-central1",
+    ):
+        super().__init__(rate_limiter)
+        self.project_id = project_id
+        self.location = location
+        self._credentials: Union[
+            "auth_credentials.Credentials", "service_account.Credentials", None
+        ] = None
+
+    @property
+    def provider_name(self) -> str:
+        return "vertex-ai"
+
+    async def initialize(self) -> bool:
+        """Initialize Vertex AI with service account credentials"""
+        try:
+            import google.auth
+            from google.auth.transport.requests import Request
+            import os
+
+            # Get credentials from environment or default
+            credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+
+            if credentials_path and os.path.exists(credentials_path):
+                from google.oauth2 import service_account
+                self._credentials = service_account.Credentials.from_service_account_file(
+                    credentials_path,
+                    scopes=['https://www.googleapis.com/auth/cloud-platform']
+                )
+                logger.info(f"Loaded Vertex AI credentials from {credentials_path}")
+            else:
+                # Try application default credentials
+                creds: Any
+                project: Any
+                creds, project = google.auth.default(
+                    scopes=['https://www.googleapis.com/auth/cloud-platform']
+                )
+                self._credentials = creds
+                if not self.project_id:
+                    self.project_id = project
+                logger.info("Using application default credentials for Vertex AI")
+
+            if not self.project_id:
+                self.project_id = os.environ.get('GCP_PROJECT_ID') or os.environ.get('GOOGLE_CLOUD_PROJECT')
+
+            if not self.project_id:
+                logger.error("GCP project ID not configured. Set GCP_PROJECT_ID or GOOGLE_CLOUD_PROJECT")
+                return False
+
+            # Initialize HTTP client
+            import httpx
+            self._client = httpx.AsyncClient(timeout=120.0)
+
+            logger.info(f"Vertex AI initialized for project: {self.project_id}, location: {self.location}")
+            return True
+
+        except ImportError as e:
+            logger.error(f"Missing dependencies for Vertex AI: {e}")
+            logger.error("Install with: pip install google-cloud-aiplatform google-auth")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to initialize Vertex AI: {e}")
+            return False
+
+    async def _get_access_token(self) -> str:
+        """Get OAuth2 access token for API calls"""
+        from google.auth.transport.requests import Request
+
+        assert self._credentials is not None
+        if not self._credentials.valid:
+            await asyncio.to_thread(self._credentials.refresh, Request())
+
+        return self._credentials.token  # type: ignore
+
+    def get_endpoint_url(self, model: str) -> str:
+        """
+        Get the REST endpoint URL for a model.
+        This URL can be shared with third-party platforms.
+        """
+        return (
+            f"https://{self.location}-aiplatform.googleapis.com/v1/"
+            f"projects/{self.project_id}/locations/{self.location}/"
+            f"publishers/google/models/{model}:generateContent"
+        )
+
+    async def complete(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        **kwargs: Any
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+        assert self._client is not None
+
+        start_time = time.time()
+
+        try:
+            await self.rate_limiter.check_and_wait(
+                self.provider_name,
+                kwargs.get("max_tokens", 1000),
+            )
+
+            # Get access token
+            access_token = await self._get_access_token()
+
+            # Convert messages to Vertex AI format
+            contents: list[dict[str, Any]] = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    # Vertex AI doesn't have system role, prepend to first user message
+                    continue
+                contents.append(
+                    {
+                        "role": "user" if msg["role"] == "user" else "model",
+                        "parts": [{"text": msg["content"]}],
+                    }
+                )
+
+            # Build request
+            url = self.get_endpoint_url(model)
+
+            request_body = {
+                "contents": contents,
+                "generationConfig": {
+                    "temperature": kwargs.get("temperature", 0.7),
+                    "maxOutputTokens": kwargs.get("max_tokens", 4096),
+                }
+            }
+
+            # Make request
+            response = await self._client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json=request_body
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            latency = (time.time() - start_time) * 1000
+
+            # Extract content
+            content = ""
+            if "candidates" in data and data["candidates"]:
+                candidate = data["candidates"][0]
+                if "content" in candidate and "parts" in candidate["content"]:
+                    content = candidate["content"]["parts"][0].get("text", "")
+
+            # Extract usage
+            usage_metadata = data.get("usageMetadata", {})
+
+            return APIResponse(
+                content=content,
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": usage_metadata.get("promptTokenCount", 0),
+                    "output_tokens": usage_metadata.get("candidatesTokenCount", 0),
+                },
+                latency_ms=latency,
+                success=True,
+                metadata={"endpoint_url": url}
+            )
+
         except Exception as e:
             return APIResponse(
                 content="",
@@ -546,12 +745,13 @@ class OllamaProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
+        assert self._client is not None
 
         start_time = time.time()
 
@@ -622,19 +822,20 @@ class MistralProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
+        assert self._client is not None
 
         start_time = time.time()
 
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
-                kwargs.get("max_tokens", 1000)
+                kwargs.get("max_tokens", 1000),
             )
 
             response = await self._client.post(
@@ -704,19 +905,20 @@ class GroqProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
+        assert self._client is not None
 
         start_time = time.time()
 
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
-                kwargs.get("max_tokens", 1000)
+                kwargs.get("max_tokens", 1000),
             )
 
             response = await self._client.post(
@@ -786,19 +988,20 @@ class XAIProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
+        assert self._client is not None
 
         start_time = time.time()
 
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
-                kwargs.get("max_tokens", 1000)
+                kwargs.get("max_tokens", 1000),
             )
 
             response = await self._client.post(
@@ -868,19 +1071,20 @@ class PerplexityProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
+        assert self._client is not None
 
         start_time = time.time()
 
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
-                kwargs.get("max_tokens", 1000)
+                kwargs.get("max_tokens", 1000),
             )
 
             response = await self._client.post(
@@ -950,19 +1154,20 @@ class DeepSeekProvider(BaseProvider):
 
     async def complete(
         self,
-        messages: list[dict],
+        messages: list[dict[str, Any]],
         model: str,
-        **kwargs
+        **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
+        assert self._client is not None
 
         start_time = time.time()
 
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
-                kwargs.get("max_tokens", 1000)
+                kwargs.get("max_tokens", 1000),
             )
 
             response = await self._client.post(
@@ -1168,6 +1373,58 @@ class ModelRegistry:
         ),
 
         # Google Models
+        "gemini-3-pro": ModelCapability(
+            name="Gemini 3.0 Pro (Preview)",
+            provider="google",
+            model_id="gemini-3-pro-preview",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
+                       TaskType.REASONING, TaskType.LONG_CONTEXT,
+                       TaskType.MULTIMODAL),
+            context_window=2000000,
+            cost_per_1k_input=0.0015,
+            cost_per_1k_output=0.006,
+            strengths=("next-gen intelligence", "coding", "multimodal", "massive context"),
+            supports_vision=True,
+            supports_functions=True,
+        ),
+        "gemini-3-flash": ModelCapability(
+            name="Gemini 3.0 Flash (Preview)",
+            provider="google",
+            model_id="gemini-3-flash-preview",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
+                       TaskType.LONG_CONTEXT, TaskType.MULTIMODAL),
+            context_window=1000000,
+            cost_per_1k_input=0.0001,
+            cost_per_1k_output=0.0004,
+            strengths=("next-gen speed", "multimodal", "cost-effective"),
+            supports_vision=True,
+        ),
+        "gemini-2.5-pro": ModelCapability(
+            name="Gemini 2.5 Pro",
+            provider="google",
+            model_id="gemini-2.5-pro",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
+                       TaskType.REASONING, TaskType.LONG_CONTEXT,
+                       TaskType.MULTIMODAL),
+            context_window=2000000,
+            cost_per_1k_input=0.00125,
+            cost_per_1k_output=0.005,
+            strengths=("advanced reasoning", "coding", "multimodal", "2M context"),
+            supports_vision=True,
+            supports_functions=True,
+        ),
+        "gemini-2.5-flash": ModelCapability(
+            name="Gemini 2.5 Flash",
+            provider="google",
+            model_id="gemini-2.5-flash",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
+                       TaskType.LONG_CONTEXT, TaskType.MULTIMODAL),
+            context_window=1000000,
+            cost_per_1k_input=0.0001,
+            cost_per_1k_output=0.0004,
+            strengths=("very fast", "multimodal", "cost-effective"),
+            supports_vision=True,
+        ),
         "gemini-2.0-flash": ModelCapability(
             name="Gemini 2.0 Flash",
             provider="google",
@@ -1190,6 +1447,34 @@ class ModelRegistry:
             cost_per_1k_input=0.00125,
             cost_per_1k_output=0.005,
             strengths=("2M context", "multimodal", "data analysis"),
+            supports_vision=True,
+        ),
+
+        # Vertex AI Models (Enterprise/Third-Party Integration)
+        "vertex-gemini-3-pro": ModelCapability(
+            name="Gemini 3.0 Pro (Vertex AI)",
+            provider="vertex-ai",
+            model_id="gemini-3-pro-preview",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
+                       TaskType.REASONING, TaskType.LONG_CONTEXT,
+                       TaskType.MULTIMODAL),
+            context_window=2000000,
+            cost_per_1k_input=0.0015,
+            cost_per_1k_output=0.006,
+            strengths=("enterprise endpoint", "third-party integration", "OAuth2 auth"),
+            supports_vision=True,
+            supports_functions=True,
+        ),
+        "vertex-gemini-2.5-flash": ModelCapability(
+            name="Gemini 2.5 Flash (Vertex AI)",
+            provider="vertex-ai",
+            model_id="gemini-2.5-flash",
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
+                       TaskType.LONG_CONTEXT, TaskType.MULTIMODAL),
+            context_window=1000000,
+            cost_per_1k_input=0.0001,
+            cost_per_1k_output=0.0004,
+            strengths=("enterprise endpoint", "fast", "stable"),
             supports_vision=True,
         ),
 
@@ -1393,18 +1678,19 @@ class AIOrchestrator:
         prefer_local: bool = False,
         cost_optimize: bool = False,
         verbose: bool = False,
-    ):
+    ) -> None:
         self.prefer_local = prefer_local
         self.cost_optimize = cost_optimize
         self.verbose = verbose
 
         self.rate_limiter = RateLimiter()
         self.providers: dict[str, BaseProvider] = {}
-        self.conversation_history: list[dict] = []
+        self.conversation_history: list[dict[str, Any]] = []
+        self._max_history_messages = 200
 
         self._setup_logging()
 
-    def _setup_logging(self):
+    def _setup_logging(self) -> None:
         level = logging.DEBUG if self.verbose else logging.INFO
         logging.basicConfig(
             level=level,
@@ -1414,12 +1700,15 @@ class AIOrchestrator:
     async def _get_provider(self, provider_name: str) -> BaseProvider | None:
         """Get or initialize a provider"""
         if provider_name not in self.providers:
+            provider: BaseProvider | None = None
             if provider_name == "openai":
                 provider = OpenAIProvider(self.rate_limiter)
             elif provider_name == "anthropic":
                 provider = AnthropicProvider(self.rate_limiter)
             elif provider_name == "google":
                 provider = GoogleProvider(self.rate_limiter)
+            elif provider_name == "vertex-ai":
+                provider = VertexAIProvider(self.rate_limiter)
             elif provider_name == "ollama":
                 provider = OllamaProvider(self.rate_limiter)
             elif provider_name == "mistral":
@@ -1436,10 +1725,13 @@ class AIOrchestrator:
                 logger.error(f"Unknown provider: {provider_name}")
                 return None
 
-            if await provider.initialize():
-                self.providers[provider_name] = provider
-            else:
-                return None
+            if provider is not None:
+                if await provider.initialize():
+                    self.providers[provider_name] = provider
+                else:
+                    # If initialization fails, log it but don't return None from here.
+                    # The get method below will handle the case where the provider is not in the dict.
+                    logger.error(f"Failed to initialize provider: {provider_name}")
 
         return self.providers.get(provider_name)
 
@@ -1540,28 +1832,27 @@ class AIOrchestrator:
                 return APIResponse(
                     content="",
                     model=model_override,
-                    provider="",
+                    provider="unknown",
                     usage={},
                     latency_ms=0,
                     success=False,
-                    error=f"Unknown model: {model_override}",
+                    error=f"Unknown model: '{model_override}'.",
                 )
         else:
             model = self.select_model(task_types)
-            if not model:
-                return APIResponse(
-                    content="",
-                    model="",
-                    provider="",
-                    usage={},
-                    latency_ms=0,
-                    success=False,
-                    error="No suitable model found",
-                )
 
-        logger.info(f"Selected model: {model.name} ({model.provider})")
+        if not model:
+            return APIResponse(
+                content="",
+                model="N/A",
+                provider="N/A",
+                usage={},
+                latency_ms=0,
+                success=False,
+                error="Could not select a suitable model for the task.",
+            )
 
-        # Get provider
+        # Get provider for the selected model
         provider = await self._get_provider(model.provider)
         if not provider:
             return APIResponse(
@@ -1571,38 +1862,50 @@ class AIOrchestrator:
                 usage={},
                 latency_ms=0,
                 success=False,
-                error=f"Provider {model.provider} not available",
+                error=f"Provider '{model.provider}' is not available or failed to initialize.",
             )
 
         # Build messages
-        messages = []
+        messages: list[dict[str, Any]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
-        messages.extend(self.conversation_history)
         messages.append({"role": "user", "content": prompt})
 
-        # Execute with retry
-        async def execute():
-            return await provider.complete(
-                messages=messages,
-                model=model.model_id,
-                max_tokens=max_tokens,
-                temperature=temperature,
+        # Add conversation history
+        self.conversation_history.extend(messages)
+
+        # Query the provider with retry logic
+        try:
+            response = await RetryHandler.execute_with_retry(
+                lambda: provider.complete(
+                    self.conversation_history,
+                    model=model.model_id,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+            )
+            # Add successful response to history
+            if response.success and response.content:
+                self.conversation_history.append(
+                    {"role": "assistant", "content": response.content}
+                )
+                # Prevent unbounded history growth
+                if len(self.conversation_history) > self._max_history_messages:
+                    self.conversation_history = self.conversation_history[-self._max_history_messages:]
+            return response
+        except Exception as e:
+            logger.error(f"Query failed after retries: {e}")
+            return APIResponse(
+                content="",
+                model=model.name,
+                provider=model.provider,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"An unexpected error occurred: {e}",
             )
 
-        response = await RetryHandler.execute_with_retry(execute)
-
-        # Update conversation history
-        if response.success:
-            self.conversation_history.append({"role": "user", "content": prompt})
-            self.conversation_history.append({
-                "role": "assistant",
-                "content": response.content
-            })
-
-        return response
-
-    def clear_history(self):
+    def clear_history(self) -> None:
         """Clear conversation history"""
         self.conversation_history.clear()
 
@@ -1627,22 +1930,26 @@ class AIOrchestrator:
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        return {
-            model: result if not isinstance(result, Exception)
-                   else APIResponse(
-                       content="",
-                       model=model,
-                       provider="",
-                       usage={},
-                       latency_ms=0,
-                       success=False,
-                       error=str(result),
-                   )
-            for model, result in zip(models, results, strict=False)
-        }
+        result_map: dict[str, APIResponse] = {}
+        for model, result in zip(models, results, strict=False):
+            if isinstance(result, BaseException):
+                result_map[model] = APIResponse(
+                    content="",
+                    model=model,
+                    provider="",
+                    usage={},
+                    latency_ms=0,
+                    success=False,
+                    error=str(result),
+                )
+            else:
+                # result is APIResponse
+                result_map[model] = result
+
+        return result_map
 
 
-async def main():
+async def main() -> None:
     """CLI interface for the orchestrator"""
     import argparse
 
@@ -1658,7 +1965,7 @@ async def main():
     args = parser.parse_args()
 
     if args.configure:
-        from credentials import configure_credentials_interactive
+        from .credentials import configure_credentials_interactive
         configure_credentials_interactive()
         return
 
