@@ -214,3 +214,6 @@ temp/
 *.tmp
 *.bak
 *.backup
+
+# User API keys
+~/.api_keys
