@@ -74,6 +74,34 @@ class ModelCapability:
     supports_vision: bool = False
 
 
+@dataclass(frozen=True)
+class ProviderCharacteristics:
+    """
+    Captures the nuanced strengths and weaknesses of AI providers.
+    Used for intelligent model selection based on prompt characteristics.
+    
+    Based on comparative analysis of model capabilities:
+    - strengths: Areas where this provider excels
+    - weaknesses: Known limitations to consider
+    - best_for: Specific use cases where this provider shines
+    - avoid_for: Use cases where other providers are preferable
+    """
+    provider: str
+    strengths: tuple[str, ...]
+    weaknesses: tuple[str, ...]
+    best_for: tuple[str, ...]
+    avoid_for: tuple[str, ...]
+    # Numeric scores (0.0 to 1.0) for fine-grained selection
+    contextual_understanding: float = 0.5
+    creativity_originality: float = 0.5
+    emotional_intelligence: float = 0.5
+    speed_efficiency: float = 0.5
+    knowledge_breadth: float = 0.5
+    reasoning_depth: float = 0.5
+    code_quality: float = 0.5
+    objectivity: float = 0.5
+
+
 @dataclass
 class RateLimitState:
     """Track rate limiting state per provider"""
@@ -1207,6 +1235,498 @@ class DeepSeekProvider(BaseProvider):
             )
 
 
+class MLXProvider(BaseProvider):
+    """
+    MLX local model provider for Apple Silicon.
+    
+    Invokes the mlx-llama8 command-line tool for inference.
+    This provider is designed for local, private, offline inference
+    on Mac devices with Apple Silicon (M1/M2/M3/M4).
+    """
+
+    def __init__(self, rate_limiter: RateLimiter, command: str = "mlx-llama8"):
+        super().__init__(rate_limiter)
+        self.command = command
+        self._available = False
+
+    @property
+    def provider_name(self) -> str:
+        return "mlx"
+
+    async def initialize(self) -> bool:
+        """Check if mlx-llama8 command is available"""
+        import shutil
+        import subprocess
+        
+        # Check if command exists
+        if shutil.which(self.command):
+            self._available = True
+            logger.info(f"MLX provider initialized with command: {self.command}")
+            return True
+        
+        # Try running with --version or --help to verify
+        try:
+            result = subprocess.run(
+                [self.command, "--help"],
+                capture_output=True,
+                timeout=5,
+            )
+            self._available = result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
+            logger.warning(f"MLX model not available: {e}")
+            self._available = False
+        
+        return self._available
+
+    async def complete(
+        self,
+        messages: list[dict[str, Any]],
+        model: str,
+        **kwargs: Any
+    ) -> APIResponse:
+        import subprocess
+        import json as json_module
+        
+        start_time = time.time()
+
+        try:
+            # Convert messages to a single prompt
+            # MLX models typically expect a simple text input
+            prompt = self._format_messages(messages)
+            
+            # Run the mlx-llama8 command
+            # We use stdin to pass the prompt and capture stdout
+            result = await asyncio.to_thread(
+                self._run_mlx_command,
+                prompt,
+                kwargs.get("max_tokens", 4096),
+                kwargs.get("temperature", 0.7),
+            )
+            
+            latency = (time.time() - start_time) * 1000
+
+            return APIResponse(
+                content=result,
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    # MLX doesn't provide token counts in standard output
+                    # Estimate based on whitespace-separated words
+                    "input_tokens": len(prompt.split()),
+                    "output_tokens": len(result.split()),
+                },
+                latency_ms=latency,
+                success=True,
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+    def _format_messages(self, messages: list[dict[str, Any]]) -> str:
+        """Convert chat messages to a single prompt string"""
+        parts = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                parts.append(f"System: {content}")
+            elif role == "assistant":
+                parts.append(f"Assistant: {content}")
+            else:
+                parts.append(f"User: {content}")
+        return "\n\n".join(parts)
+
+    def _run_mlx_command(
+        self, 
+        prompt: str, 
+        max_tokens: int, 
+        temperature: float
+    ) -> str:
+        """Execute the MLX command and return the response"""
+        import subprocess
+        
+        # Build command with common MLX-LM arguments
+        cmd = [
+            self.command,
+            "--prompt", prompt,
+        ]
+        
+        # Add optional parameters if the command supports them
+        # These are common flags for MLX-LM based tools
+        if max_tokens:
+            cmd.extend(["--max-tokens", str(max_tokens)])
+        if temperature != 0.7:  # Only add if non-default
+            cmd.extend(["--temp", str(temperature)])
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute timeout for long generations
+        )
+        
+        if result.returncode != 0:
+            raise RuntimeError(f"MLX command failed: {result.stderr}")
+        
+        return result.stdout.strip()
+
+
+
+# Provider characteristics registry for intelligent model selection
+# Based on comparative analysis of model capabilities and behaviors
+PROVIDER_CHARACTERISTICS: dict[str, ProviderCharacteristics] = {
+    "openai": ProviderCharacteristics(
+        provider="openai",
+        strengths=(
+            "large training dataset",
+            "strong general knowledge",
+            "good speed",
+            "function calling",
+            "multimodal support",
+        ),
+        weaknesses=(
+            "can be less nuanced in creative tasks",
+            "sometimes verbose",
+        ),
+        best_for=(
+            "general purpose tasks",
+            "API integration",
+            "function calling",
+            "quick responses",
+        ),
+        avoid_for=(
+            "highly creative writing",
+            "privacy-sensitive tasks",
+        ),
+        contextual_understanding=0.85,
+        creativity_originality=0.7,
+        emotional_intelligence=0.6,
+        speed_efficiency=0.85,
+        knowledge_breadth=0.9,
+        reasoning_depth=0.8,
+        code_quality=0.85,
+        objectivity=0.75,
+    ),
+    "anthropic": ProviderCharacteristics(
+        provider="anthropic",
+        strengths=(
+            "excellent contextual understanding",
+            "nuanced creative writing",
+            "strong coding abilities",
+            "thoughtful responses",
+            "good at following instructions",
+        ),
+        weaknesses=(
+            "can be overly cautious",
+            "may refuse edge cases",
+        ),
+        best_for=(
+            "complex reasoning",
+            "code generation",
+            "creative writing",
+            "long-form content",
+            "nuanced analysis",
+        ),
+        avoid_for=(
+            "simple quick tasks where speed matters most",
+        ),
+        contextual_understanding=0.95,
+        creativity_originality=0.85,
+        emotional_intelligence=0.7,
+        speed_efficiency=0.75,
+        knowledge_breadth=0.85,
+        reasoning_depth=0.95,
+        code_quality=0.95,
+        objectivity=0.85,
+    ),
+    "google": ProviderCharacteristics(
+        provider="google",
+        strengths=(
+            "massive context window",
+            "multimodal excellence",
+            "creative and original",
+            "strong reasoning",
+            "cost-effective",
+        ),
+        weaknesses=(
+            "newer models may have quirks",
+            "occasionally inconsistent",
+        ),
+        best_for=(
+            "long document analysis",
+            "multimodal tasks",
+            "creative generation",
+            "research tasks",
+        ),
+        avoid_for=(
+            "tasks requiring very precise formatting",
+        ),
+        contextual_understanding=0.85,
+        creativity_originality=0.9,
+        emotional_intelligence=0.65,
+        speed_efficiency=0.9,
+        knowledge_breadth=0.9,
+        reasoning_depth=0.85,
+        code_quality=0.8,
+        objectivity=0.8,
+    ),
+    "vertex-ai": ProviderCharacteristics(
+        provider="vertex-ai",
+        strengths=(
+            "enterprise-grade stability",
+            "OAuth2 authentication",
+            "third-party integration",
+            "same models as Google AI",
+        ),
+        weaknesses=(
+            "requires GCP setup",
+            "more complex authentication",
+        ),
+        best_for=(
+            "enterprise deployments",
+            "GCP integration",
+            "production workloads",
+        ),
+        avoid_for=(
+            "quick prototyping",
+            "personal use",
+        ),
+        contextual_understanding=0.85,
+        creativity_originality=0.85,
+        emotional_intelligence=0.65,
+        speed_efficiency=0.85,
+        knowledge_breadth=0.9,
+        reasoning_depth=0.85,
+        code_quality=0.8,
+        objectivity=0.8,
+    ),
+    "ollama": ProviderCharacteristics(
+        provider="ollama",
+        strengths=(
+            "completely free",
+            "fully private",
+            "works offline",
+            "no data sharing",
+        ),
+        weaknesses=(
+            "limited to local hardware",
+            "smaller models than cloud",
+            "slower on less powerful hardware",
+        ),
+        best_for=(
+            "privacy-sensitive tasks",
+            "offline work",
+            "cost-conscious usage",
+            "experimentation",
+        ),
+        avoid_for=(
+            "complex reasoning requiring large models",
+            "tasks needing real-time information",
+        ),
+        contextual_understanding=0.6,
+        creativity_originality=0.5,
+        emotional_intelligence=0.4,
+        speed_efficiency=0.7,  # Depends on hardware
+        knowledge_breadth=0.5,
+        reasoning_depth=0.5,
+        code_quality=0.6,
+        objectivity=0.7,
+    ),
+    "mlx": ProviderCharacteristics(
+        provider="mlx",
+        strengths=(
+            "optimized for Apple Silicon",
+            "fast local inference",
+            "completely private",
+            "works offline",
+            "no API costs",
+            "good speed and efficiency",
+        ),
+        weaknesses=(
+            "limited common sense compared to large cloud models",
+            "less emotional intelligence",
+            "contextual understanding can be limited",
+            "smaller knowledge base than cloud models",
+        ),
+        best_for=(
+            "privacy-sensitive tasks",
+            "offline work",
+            "quick local queries",
+            "Mac-native workflows",
+            "cost-free inference",
+        ),
+        avoid_for=(
+            "complex multi-step reasoning",
+            "tasks requiring empathy or emotional nuance",
+            "real-time web information",
+            "very large context processing",
+        ),
+        contextual_understanding=0.55,
+        creativity_originality=0.5,
+        emotional_intelligence=0.35,
+        speed_efficiency=0.85,  # Optimized for Apple Silicon
+        knowledge_breadth=0.6,
+        reasoning_depth=0.5,
+        code_quality=0.6,
+        objectivity=0.8,
+    ),
+    "mistral": ProviderCharacteristics(
+        provider="mistral",
+        strengths=(
+            "excellent coding",
+            "strong reasoning",
+            "multilingual support",
+            "efficient architecture",
+        ),
+        weaknesses=(
+            "smaller model lineup",
+            "less multimodal support",
+        ),
+        best_for=(
+            "code generation",
+            "multilingual tasks",
+            "European language content",
+        ),
+        avoid_for=(
+            "multimodal tasks",
+            "image analysis",
+        ),
+        contextual_understanding=0.8,
+        creativity_originality=0.75,
+        emotional_intelligence=0.55,
+        speed_efficiency=0.85,
+        knowledge_breadth=0.75,
+        reasoning_depth=0.8,
+        code_quality=0.9,
+        objectivity=0.8,
+    ),
+    "groq": ProviderCharacteristics(
+        provider="groq",
+        strengths=(
+            "ultra-fast inference",
+            "very cost-effective",
+            "good for high-throughput",
+        ),
+        weaknesses=(
+            "limited model selection",
+            "runs other providers' models",
+        ),
+        best_for=(
+            "speed-critical applications",
+            "high-volume processing",
+            "real-time responses",
+        ),
+        avoid_for=(
+            "tasks needing unique model capabilities",
+        ),
+        contextual_understanding=0.75,
+        creativity_originality=0.7,
+        emotional_intelligence=0.5,
+        speed_efficiency=0.98,
+        knowledge_breadth=0.75,
+        reasoning_depth=0.7,
+        code_quality=0.75,
+        objectivity=0.75,
+    ),
+    "xai": ProviderCharacteristics(
+        provider="xai",
+        strengths=(
+            "real-time knowledge",
+            "creative writing",
+            "objectivity and neutrality",
+            "reasoning capabilities",
+        ),
+        weaknesses=(
+            "newer platform",
+            "smaller ecosystem",
+        ),
+        best_for=(
+            "current events",
+            "creative tasks",
+            "unbiased analysis",
+        ),
+        avoid_for=(
+            "tasks requiring extensive tool ecosystem",
+        ),
+        contextual_understanding=0.8,
+        creativity_originality=0.85,
+        emotional_intelligence=0.7,
+        speed_efficiency=0.8,
+        knowledge_breadth=0.85,
+        reasoning_depth=0.8,
+        code_quality=0.75,
+        objectivity=0.9,
+    ),
+    "perplexity": ProviderCharacteristics(
+        provider="perplexity",
+        strengths=(
+            "real-time web search",
+            "citations and sources",
+            "current information",
+            "research capabilities",
+        ),
+        weaknesses=(
+            "focused on search use case",
+            "less general-purpose",
+        ),
+        best_for=(
+            "research queries",
+            "current events",
+            "fact-checking",
+            "information gathering",
+        ),
+        avoid_for=(
+            "creative writing",
+            "code generation",
+            "offline tasks",
+        ),
+        contextual_understanding=0.75,
+        creativity_originality=0.5,
+        emotional_intelligence=0.4,
+        speed_efficiency=0.8,
+        knowledge_breadth=0.95,  # With web search
+        reasoning_depth=0.7,
+        code_quality=0.5,
+        objectivity=0.85,
+    ),
+    "deepseek": ProviderCharacteristics(
+        provider="deepseek",
+        strengths=(
+            "excellent cost-efficiency",
+            "strong coding abilities",
+            "good reasoning",
+            "emotional understanding focus",
+        ),
+        weaknesses=(
+            "less established platform",
+            "smaller context than some competitors",
+        ),
+        best_for=(
+            "budget-conscious coding tasks",
+            "reasoning problems",
+            "cost optimization",
+        ),
+        avoid_for=(
+            "tasks requiring very large context",
+        ),
+        contextual_understanding=0.75,
+        creativity_originality=0.7,
+        emotional_intelligence=0.75,
+        speed_efficiency=0.85,
+        knowledge_breadth=0.7,
+        reasoning_depth=0.85,
+        code_quality=0.9,
+        objectivity=0.8,
+    ),
+}
+
 class TaskClassifier:
     """Classify user prompts into task types"""
 
@@ -1637,6 +2157,24 @@ class ModelRegistry:
             cost_per_1k_output=0.00219,
             strengths=("deep reasoning", "math", "problem-solving"),
         ),
+
+        # MLX Local Models (Apple Silicon optimized)
+        "mlx-llama8": ModelCapability(
+            name="MLX Llama 8B",
+            provider="mlx",
+            model_id="mlx-llama8",
+            task_types=(TaskType.GENERAL_NLP, TaskType.LOCAL_MODEL,
+                       TaskType.CODE_GENERATION),
+            context_window=8192,
+            cost_per_1k_input=0,  # Free local inference
+            cost_per_1k_output=0,
+            strengths=(
+                "free", "private", "offline", "fast on Apple Silicon",
+                "good speed and efficiency", "objective responses",
+            ),
+            max_output_tokens=4096,
+            supports_streaming=True,
+        ),
     }
 
     @classmethod
@@ -1650,10 +2188,11 @@ class ModelRegistry:
         require_local: bool = False,
     ) -> list[ModelCapability]:
         """Get models suitable for a task type"""
+        local_providers = {"ollama", "mlx"}  # Both are local inference providers
         suitable = []
         for model in cls.MODELS.values():
             if task_type in model.task_types:
-                if require_local and model.provider != "ollama":
+                if require_local and model.provider not in local_providers:
                     continue
                 suitable.append(model)
 
@@ -1721,6 +2260,8 @@ class AIOrchestrator:
                 provider = PerplexityProvider(self.rate_limiter)
             elif provider_name == "deepseek":
                 provider = DeepSeekProvider(self.rate_limiter)
+            elif provider_name == "mlx":
+                provider = MLXProvider(self.rate_limiter)
             else:
                 logger.error(f"Unknown provider: {provider_name}")
                 return None
@@ -1739,11 +2280,20 @@ class AIOrchestrator:
         self,
         task_types: list[tuple[TaskType, float]],
     ) -> ModelCapability | None:
-        """Select the best model for the given task types"""
+        """
+        Select the best model for the given task types.
+        
+        Uses a multi-factor scoring system that considers:
+        1. Task type match (primary factor)
+        2. Provider characteristics (strengths/weaknesses)
+        3. Cost optimization (if enabled)
+        4. Context window size (for long context tasks)
+        """
         if not task_types:
             task_types = [(TaskType.GENERAL_NLP, 0.5)]
 
         primary_task = task_types[0][0]
+        all_tasks = [t[0] for t in task_types]
 
         # Get suitable models
         candidates = ModelRegistry.get_models_for_task(
@@ -1755,23 +2305,52 @@ class AIOrchestrator:
             # Fallback to any available model
             candidates = list(ModelRegistry.MODELS.values())
 
-        # Score candidates
+        # Score candidates using provider characteristics
         scored = []
         for model in candidates:
             score = 0.0
 
-            # Task match score
+            # 1. Task match score (base scoring)
             for task, confidence in task_types:
                 if task in model.task_types:
                     score += confidence * 10
 
-            # Cost optimization
+            # 2. Provider characteristics scoring
+            provider_chars = PROVIDER_CHARACTERISTICS.get(model.provider)
+            if provider_chars:
+                # Map task types to relevant provider scores
+                task_score_weights = self._get_task_score_weights(all_tasks)
+                
+                # Apply weighted provider characteristics
+                score += provider_chars.contextual_understanding * task_score_weights.get("contextual", 0)
+                score += provider_chars.creativity_originality * task_score_weights.get("creativity", 0)
+                score += provider_chars.emotional_intelligence * task_score_weights.get("emotional", 0)
+                score += provider_chars.speed_efficiency * task_score_weights.get("speed", 0)
+                score += provider_chars.knowledge_breadth * task_score_weights.get("knowledge", 0)
+                score += provider_chars.reasoning_depth * task_score_weights.get("reasoning", 0)
+                score += provider_chars.code_quality * task_score_weights.get("code", 0)
+                score += provider_chars.objectivity * task_score_weights.get("objectivity", 0)
+                
+                # Penalty for tasks in avoid_for list
+                for avoid_case in provider_chars.avoid_for:
+                    avoid_lower = avoid_case.lower()
+                    for task in all_tasks:
+                        if task.name.lower().replace("_", " ") in avoid_lower or \
+                           avoid_lower in task.name.lower().replace("_", " "):
+                            score -= 2.0  # Penalty for mismatched use case
+
+            # 3. Cost optimization
             if self.cost_optimize:
                 score -= model.cost_per_1k_input * 100
 
-            # Context window bonus for long context tasks
-            if TaskType.LONG_CONTEXT in [t[0] for t in task_types]:
+            # 4. Context window bonus for long context tasks
+            if TaskType.LONG_CONTEXT in all_tasks:
                 score += model.context_window / 100000
+
+            # 5. Prefer local models when privacy keywords detected
+            if TaskType.LOCAL_MODEL in all_tasks:
+                if model.provider in {"ollama", "mlx"}:
+                    score += 5.0  # Significant bonus for local/private
 
             scored.append((model, score))
 
@@ -1784,6 +2363,56 @@ class AIOrchestrator:
             logger.info(f"Model scores: {[(m.name, s) for m, s in scored[:5]]}")
 
         return scored[0][0]
+
+    def _get_task_score_weights(
+        self,
+        task_types: list[TaskType],
+    ) -> dict[str, float]:
+        """
+        Map task types to weighted provider characteristic scores.
+        
+        Returns weights for each provider characteristic based on
+        which characteristics are most relevant for the detected tasks.
+        """
+        weights: dict[str, float] = {
+            "contextual": 0.5,  # Base weight for all tasks
+            "creativity": 0.0,
+            "emotional": 0.0,
+            "speed": 0.5,  # Speed is generally important
+            "knowledge": 0.5,
+            "reasoning": 0.0,
+            "code": 0.0,
+            "objectivity": 0.5,
+        }
+        
+        for task in task_types:
+            if task == TaskType.CODE_GENERATION:
+                weights["code"] += 3.0
+                weights["reasoning"] += 1.0
+            elif task == TaskType.CREATIVE_WRITING:
+                weights["creativity"] += 3.0
+                weights["emotional"] += 1.5
+            elif task == TaskType.DEEP_REASONING or task == TaskType.REASONING:
+                weights["reasoning"] += 3.0
+                weights["contextual"] += 1.0
+            elif task == TaskType.DATA_ANALYSIS:
+                weights["reasoning"] += 2.0
+                weights["knowledge"] += 1.0
+            elif task == TaskType.MATH:
+                weights["reasoning"] += 2.5
+                weights["code"] += 0.5
+            elif task == TaskType.SUMMARIZATION:
+                weights["contextual"] += 2.0
+            elif task == TaskType.LONG_CONTEXT:
+                weights["contextual"] += 2.0
+            elif task == TaskType.WEB_SEARCH:
+                weights["knowledge"] += 3.0
+            elif task == TaskType.MULTIMODAL:
+                weights["contextual"] += 1.0
+            elif task == TaskType.LOCAL_MODEL:
+                weights["speed"] += 1.0  # Local models prioritize speed
+        
+        return weights
 
     async def query(
         self,

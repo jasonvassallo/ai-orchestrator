@@ -159,12 +159,13 @@ class TestModelRegistry:
 
     def test_get_local_models(self):
         """Should filter for local models when requested"""
+        local_providers = {"ollama", "mlx"}  # Both are valid local providers
         models = ModelRegistry.get_models_for_task(
             TaskType.GENERAL_NLP,
             require_local=True
         )
         for model in models:
-            assert model.provider == "ollama"
+            assert model.provider in local_providers
 
 
 class TestRateLimiter:
@@ -288,13 +289,14 @@ class TestAIOrchestrator:
         assert model is not None
 
     def test_model_selection_prefer_local(self):
-        """Local preference should select Ollama models"""
+        """Local preference should select local models (Ollama or MLX)"""
+        local_providers = {"ollama", "mlx"}  # Both are valid local providers
         orchestrator = AIOrchestrator(prefer_local=True)
         tasks = [(TaskType.GENERAL_NLP, 0.5)]
         model = orchestrator.select_model(tasks)
 
         assert model is not None
-        assert model.provider == "ollama"
+        assert model.provider in local_providers
 
     @pytest.mark.asyncio
     async def test_query_validates_input(self, orchestrator):

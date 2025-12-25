@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Security: Hardened](https://img.shields.io/badge/security-hardened-green.svg)](https://github.com/jasonvassallo/ai-orchestrator/security)
 
-AI Orchestrator automatically routes your queries to the best AI model based on task type. It supports **9 providers** including OpenAI, Anthropic Claude, Google Gemini, Mistral, Groq, xAI (Grok), Perplexity, DeepSeek, and local models via Ollama - all with secure credential management and production-ready features.
+AI Orchestrator automatically routes your queries to the best AI model based on task type. It supports **10 providers** including OpenAI, Anthropic Claude, Google Gemini, Mistral, Groq, xAI (Grok), Perplexity, DeepSeek, Ollama, and MLX (Apple Silicon optimized) - all with secure credential management and production-ready features.
 
 ## Features
 
@@ -72,7 +72,7 @@ python -m src.orchestrator "Explain quantum computing"
 # With model override
 python -m src.orchestrator "Debug this Python code" --model claude-sonnet-4.5
 
-# Prefer local models (Ollama)
+# Prefer local models (Ollama or MLX)
 python -m src.orchestrator "Summarize this text" --local
 
 # Cost optimization mode
@@ -245,13 +245,14 @@ python setup_app.py py2app
 | `deepseek-chat` | General, coding | 64K | Very cost-effective |
 | `deepseek-reasoner` | Math, reasoning | 64K | Deep reasoning, problem-solving |
 
-### Local Models (Ollama)
+### Local Models (Ollama & MLX)
 
-| Model | Best For | Strengths |
-|-------|----------|-----------|
-| `llama3.2` | Private, offline | Free, privacy-first |
-| `codellama` | Private coding | Free, code-focused |
-| `deepseek-coder-v2` | Complex code | Excellent coding, free |
+| Model | Provider | Best For | Strengths |
+|-------|----------|----------|-----------|
+| `llama3.2` | Ollama | Private, offline | Free, privacy-first |
+| `codellama` | Ollama | Private coding | Free, code-focused |
+| `deepseek-coder-v2` | Ollama | Complex code | Excellent coding, free |
+| `mlx-llama8` | MLX | Apple Silicon | Free, fast on M1/M2/M3/M4, private |
 
 ## API Keys Required
 
@@ -268,6 +269,7 @@ Based on which providers you want to use:
 | Perplexity | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) | Optional |
 | DeepSeek | [platform.deepseek.com](https://platform.deepseek.com/) | Optional |
 | Ollama | N/A (local) | Optional |
+| MLX | N/A (local, requires `mlx-llama8` CLI) | Optional |
 
 **You already have:** Claude (Anthropic), OpenAI, Ollama, and Perplexity - these are ready to use!
 
@@ -423,7 +425,7 @@ black --check src
 ai-orchestrator/
 ├── src/
 │   ├── __init__.py
-│   ├── orchestrator.py    # Main orchestrator logic (25+ models, 9 providers)
+│   ├── orchestrator.py    # Main orchestrator logic (25+ models, 10 providers)
 │   ├── credentials.py     # Secure credential management
 │   ├── storage.py         # Conversation storage (SQLite)
 │   ├── music.py           # Music generation (MIDI + MusicGen audio)
