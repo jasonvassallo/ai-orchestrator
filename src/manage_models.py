@@ -24,8 +24,11 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
-# The currently recommended model for this project
-RECOMMENDED_MODEL = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+# Local models that require disk space
+LOCAL_MODELS = {
+    "MLX Llama 3.1 8B": "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
+    "MusicGen Small": "facebook/musicgen-small",
+}
 
 def get_cli_path():
     """Get the absolute path to huggingface-cli in the current venv."""
@@ -59,35 +62,32 @@ def get_cache_size():
     return f"{total_size / (1024**3):.2f} GB"
 
 def ensure_model_installed():
-    """Check if the recommended model is installed."""
+    """Check if recommended models are installed."""
     from huggingface_hub import try_to_load_from_cache
 
-    print(f"\n🔍 Checking for recommended model: {RECOMMENDED_MODEL}")
+    print("\n🔍 Checking Local Models:")
+    
+    for name, repo_id in LOCAL_MODELS.items():
+        print(f"\n--- {name} ---")
+        cached = try_to_load_from_cache(repo_id=repo_id, filename="config.json")
 
-    cached = try_to_load_from_cache(repo_id=RECOMMENDED_MODEL, filename="config.json")
-
-    if cached:
-        print(f"✅ Model is already installed at:\n   {os.path.dirname(cached)}")
-        return True
-    else:
-        print("⚠️ Model not found. It requires approx 5GB of space.")
-        choice = input("Do you want to download it now? (y/N): ").strip().lower()
-        if choice == 'y':
-            print("🚀 Downloading... (This may take a while)")
-            try:
-                # Use a subprocess to run the download command
-                subprocess.run(  # noqa: S603
-                    [get_cli_path(), "download", RECOMMENDED_MODEL],
-                    check=True
-                )
-                print("✅ Download complete!")
-                return True
-            except subprocess.CalledProcessError as e:
-                print(f"❌ Download failed: {e}")
-                return False
+        if cached:
+            print(f"✅ Installed at: {os.path.dirname(cached)}")
         else:
-            print("Skipping download.")
-            return False
+            print(f"⚠️  Not found ({repo_id})")
+            choice = input(f"   Download {name} now? (y/N): ").strip().lower()
+            if choice == 'y':
+                print("   🚀 Downloading...")
+                try:
+                    subprocess.run(  # noqa: S603
+                        [get_cli_path(), "download", repo_id],
+                        check=True
+                    )
+                    print("   ✅ Download complete!")
+                except subprocess.CalledProcessError as e:
+                    print(f"   ❌ Download failed: {e}")
+            else:
+                print("   Skipping.")
 
 def clean_cache():
     """Run the interactive cache cleanup."""
