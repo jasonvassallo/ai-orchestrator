@@ -46,6 +46,9 @@ python -m src.tui.app      # or: ai-chat
 # Menu bar app
 python -m src.menubar.app  # or: ai-menubar
 
+# Manage local models (cleanup/download)
+python -m src.manage_models
+
 # Configure credentials
 python -m src.credentials  # or: ai-configure
 ```
@@ -93,6 +96,7 @@ cd vscode-extension && npm install && npm run package
 | `src/credentials.py` | Security-critical: API key management |
 | `src/storage.py` | SQLite persistence for conversation history |
 | `src/music.py` | MIDI and audio file generation |
+| `src/manage_models.py` | Utility for managing local AI models (disk space) |
 | `src/gui/` | PySide6 (Qt) desktop application |
 | `src/tui/` | Textual terminal interface |
 | `src/menubar/` | rumps macOS menu bar utility |
@@ -141,9 +145,17 @@ Three-tier fallback chain with priority order:
 
 1. User prompt → `InputValidator.validate_prompt()` → Security checks
 2. Prompt → `TaskClassifier.classify()` → List of (TaskType, confidence) tuples
-3. Task types → `AIOrchestrator.select_model()` → Best `ModelCapability`
-4. Model → `AIOrchestrator._get_provider()` → Provider instance (lazy init)
-5. Provider → `RetryHandler.execute_with_retry()` → `APIResponse`
+3. **Smart Cache Detection** → Check if local model (MLX/MusicGen) exists → Enable `HF_HUB_OFFLINE`
+4. Task types → `AIOrchestrator.select_model()` → Best `ModelCapability`
+5. Model → `AIOrchestrator._get_provider()` → Provider instance (lazy init)
+6. Provider → `RetryHandler.execute_with_retry()` → `APIResponse`
+
+### Local Model Optimization (Smart Cache)
+
+To prevent unwanted 5GB+ downloads and ensure privacy, the orchestrator implements **Smart Cache Detection**:
+- **MLX/MusicGen:** Checks the Hugging Face cache for the model ID before loading.
+- **Offline Mode:** If found locally, it sets `HF_HUB_OFFLINE=1` to bypass network checks and load instantly from disk.
+- **On-Demand:** If the model is missing, it reverts to online mode to allow the download after informing the user.
 
 ## Key Patterns
 
