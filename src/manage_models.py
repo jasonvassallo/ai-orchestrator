@@ -16,8 +16,8 @@ Usage:
 
 import logging
 import os
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 # Configure logging
@@ -27,10 +27,18 @@ logger = logging.getLogger(__name__)
 # The currently recommended model for this project
 RECOMMENDED_MODEL = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
 
+def get_cli_path():
+    """Get the absolute path to huggingface-cli in the current venv."""
+    # Assuming huggingface-cli is in the same bin dir as python
+    cli_name = "huggingface-cli.exe" if os.name == "nt" else "huggingface-cli"
+    cli_path = Path(sys.executable).parent / cli_name
+    return str(cli_path)
+
 def check_huggingface_cli():
     """Ensure huggingface-cli is installed."""
-    if not shutil.which("huggingface-cli"):
-        print("❌ 'huggingface-cli' not found.")
+    cli_path = get_cli_path()
+    if not os.path.exists(cli_path):
+        print("❌ 'huggingface-cli' not found in virtual environment.")
         print("Please install it: pip install huggingface_hub[cli]")
         return False
     return True
@@ -69,7 +77,7 @@ def ensure_model_installed():
             try:
                 # Use a subprocess to run the download command
                 subprocess.run(  # noqa: S603
-                    ["huggingface-cli", "download", RECOMMENDED_MODEL],
+                    [get_cli_path(), "download", RECOMMENDED_MODEL],
                     check=True
                 )
                 print("✅ Download complete!")
@@ -89,7 +97,7 @@ def clean_cache():
     print("\n🧹 Launching Hugging Face Cache Cleaner...")
     print("   (Use arrow keys to select, Space to delete, Enter to confirm)")
     try:
-        subprocess.run(["huggingface-cli", "delete-cache"], check=False)
+        subprocess.run([get_cli_path(), "delete-cache"], check=False)  # noqa: S603
     except KeyboardInterrupt:
         print("\nCancelled.")
 
