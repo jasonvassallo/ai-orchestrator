@@ -539,11 +539,16 @@ async def generate_audio_with_musicgen(
     prompt = ", ".join(prompt_parts)
 
     try:
-        # Load model (this is slow first time)
-        processor = AutoProcessor.from_pretrained("facebook/musicgen-small")
-        model = MusicgenForConditionalGeneration.from_pretrained(
-            "facebook/musicgen-small"
-        )
+        # Load model (try local first to avoid downloads)
+        model_id = "facebook/musicgen-small"
+        try:
+            processor = AutoProcessor.from_pretrained(model_id, local_files_only=True)
+            model = MusicgenForConditionalGeneration.from_pretrained(model_id, local_files_only=True)
+        except OSError:
+            # Fallback to downloading if not found locally
+            print(f"Model {model_id} not found locally. Downloading...")
+            processor = AutoProcessor.from_pretrained(model_id)
+            model = MusicgenForConditionalGeneration.from_pretrained(model_id)
 
         inputs = processor(
             text=[prompt],

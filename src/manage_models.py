@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+"""
+Model Management Script for AI Orchestrator
+===========================================
+
+Helps manage large local AI models to save disk space.
+Features:
+- Check for the recommended MLX model.
+- Download it if missing.
+- List installed models and their sizes.
+- interactive cleanup of old models.
+
+Usage:
+    python -m src.manage_models
+"""
+
+import logging
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger(__name__)
+
+# The currently recommended model for this project
+RECOMMENDED_MODEL = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+
+def check_huggingface_cli():
+    """Ensure huggingface-cli is installed."""
+    if not shutil.which("huggingface-cli"):
+        print("❌ 'huggingface-cli' not found.")
+        print("Please install it: pip install huggingface_hub[cli]")
+        return False
+    return True
+
+def get_cache_size():
+    """Get the size of the huggingface cache."""
+    cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+    if not cache_dir.exists():
+        return "0 GB"
+
+    total_size = 0
+    for dirpath, _, filenames in os.walk(cache_dir):
+        for f in filenames:
+            fp = os.path.join(dirpath, f)
+            if not os.path.islink(fp):
+                total_size += os.path.getsize(fp)
+
+    return f"{total_size / (1024**3):.2f} GB"
+
+def ensure_model_installed():
+    """Check if the recommended model is installed."""
+    from huggingface_hub import try_to_load_from_cache
+
+    print(f"\n🔍 Checking for recommended model: {RECOMMENDED_MODEL}")
+
+    cached = try_to_load_from_cache(repo_id=RECOMMENDED_MODEL, filename="config.json")
+
+    if cached:
+        print(f"✅ Model is already installed at:\n   {os.path.dirname(cached)}")
+        return True
+    else:
+        print("⚠️ Model not found. It requires approx 5GB of space.")
+        choice = input("Do you want to download it now? (y/N): ").strip().lower()
+        if choice == 'y':
+            print("🚀 Downloading... (This may take a while)")
+            try:
+                # Use a subprocess to run the download command
+                subprocess.run(  # noqa: S603
+                    ["huggingface-cli", "download", RECOMMENDED_MODEL],
+                    check=True
+                )
+                print("✅ Download complete!")
+                return True
+            except subprocess.CalledProcessError as e:
+                print(f"❌ Download failed: {e}")
+                return False
+        else:
+            print("Skipping download.")
+            return False
+
+def clean_cache():
+    """Run the interactive cache cleanup."""
+    if not check_huggingface_cli():
+        return
+
+    print("\n🧹 Launching Hugging Face Cache Cleaner...")
+    print("   (Use arrow keys to select, Space to delete, Enter to confirm)")
+    try:
+        subprocess.run(["huggingface-cli", "delete-cache"], check=False)
+    except KeyboardInterrupt:
+        print("\nCancelled.")
+
+def main():
+    print("=" * 50)
+    print("🤖 AI Orchestrator Model Manager")
+    print("=" * 50)
+
+    print(f"Current Cache Size: {get_cache_size()}")
+
+    # 1. Ensure we have the right model
+    ensure_model_installed()
+
+    # 2. Offer to clean up
+    print("\n" + "-" * 50)
+    print("Would you like to manage/delete old models to save space?")
+    choice = input("Run cache cleaner? (y/N): ").strip().lower()
+
+    if choice == 'y':
+        clean_cache()
+
+    print("\n✨ Done! You can now run the orchestrator with:")
+    print("   python -m src.orchestrator 'Hello' --model mlx-llama8")
+
+if __name__ == "__main__":
+    main()

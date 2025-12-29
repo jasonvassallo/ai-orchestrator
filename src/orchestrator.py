@@ -1235,76 +1235,119 @@ class MLXProvider(BaseProvider):
     """
     MLX local model provider for Apple Silicon.
 
-    Invokes the mlx-llama8 command-line tool for inference.
-    This provider is designed for local, private, offline inference
+    Uses the official mlx-lm Python package for optimized inference
     on Mac devices with Apple Silicon (M1/M2/M3/M4).
     """
 
-    def __init__(self, rate_limiter: RateLimiter, command: str = "mlx-llama8"):
+    def __init__(
+        self,
+        rate_limiter: RateLimiter,
+        model_path: str = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+    ):
         super().__init__(rate_limiter)
-        self.command = command
+        self.model_path = model_path
         self._available = False
+        self._model = None
+        self._tokenizer = None
 
     @property
     def provider_name(self) -> str:
         return "mlx"
 
     async def initialize(self) -> bool:
-        """Check if mlx-llama8 command is available"""
-        import shutil
-        import subprocess
+        """Initialize MLX model and tokenizer"""
+        try:
+            import mlx.core as mx
+            from mlx_lm import load
+            from huggingface_hub import try_to_load_from_cache
+            import os
 
-        # Check if command exists
-        if shutil.which(self.command):
+            # Smart Cache Detection
+            # Check if the model's config is already in the Hugging Face cache
+            cached_config = try_to_load_from_cache(
+                repo_id=self.model_path, 
+                filename="config.json"
+            )
+
+            if cached_config:
+                logger.info(f"Model found in cache: {cached_config}")
+                logger.info("Enabling OFFLINE mode for MLX to prevent network checks.")
+                os.environ["HF_HUB_OFFLINE"] = "1"
+            else:
+                logger.info(f"Model {self.model_path} not found in cache.")
+                logger.info("Enabling ONLINE mode to download model (approx 5GB).")
+                os.environ["HF_HUB_OFFLINE"] = "0"
+
+            # Check if we have a GPU available (Metal)
+            if not mx.metal.is_available():
+                logger.warning("Apple Metal (GPU) not available for MLX")
+                # We can still run on CPU, but it will be slower
+
+            logger.info(f"Loading MLX model: {self.model_path}")
+            self._model, self._tokenizer = load(self.model_path)
             self._available = True
-            logger.info(f"MLX provider initialized with command: {self.command}")
             return True
 
-        # Try running with --version or --help to verify
-        try:
-            result = subprocess.run(  # noqa: S603
-                [self.command, "--help"],
-                capture_output=True,
-                timeout=5,
-            )
-            self._available = result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
-            logger.warning(f"MLX model not available: {e}")
+        except ImportError as e:
+            logger.warning(f"MLX dependencies not installed: {e}")
+            logger.warning("Install with: pip install mlx-lm huggingface-hub")
             self._available = False
-
-        return self._available
+            return False
+        except Exception as e:
+            logger.error(f"Failed to load MLX model: {e}")
+            self._available = False
+            return False
 
     async def complete(
         self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
+        if not self._available and not self._model:
+            success = await self.initialize()
+            if not success:
+                return APIResponse(
+                    content="",
+                    model=model,
+                    provider=self.provider_name,
+                    usage={},
+                    latency_ms=0,
+                    success=False,
+                    error="MLX provider not available or failed to initialize",
+                )
 
         start_time = time.time()
 
         try:
-            # Convert messages to a single prompt
-            # MLX models typically expect a simple text input
-            prompt = self._format_messages(messages)
+            from mlx_lm import generate
 
-            # Run the mlx-llama8 command
-            # We use stdin to pass the prompt and capture stdout
-            result = await asyncio.to_thread(
-                self._run_mlx_command,
-                prompt,
-                kwargs.get("max_tokens", 4096),
-                kwargs.get("temperature", 0.7),
+            # Convert messages to prompt using tokenizer's template if available
+            if hasattr(self._tokenizer, "apply_chat_template"):
+                prompt = self._tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+            else:
+                prompt = self._format_messages(messages)
+
+            # Run generation in a thread to avoid blocking the event loop
+            response_text = await asyncio.to_thread(
+                generate,
+                self._model,
+                self._tokenizer,
+                prompt=prompt,
+                max_tokens=kwargs.get("max_tokens", 1024),
+                verbose=False
             )
 
             latency = (time.time() - start_time) * 1000
 
             return APIResponse(
-                content=result,
+                content=response_text,
                 model=model,
                 provider=self.provider_name,
                 usage={
-                    # MLX doesn't provide token counts in standard output
-                    # Estimate based on whitespace-separated words
                     "input_tokens": len(prompt.split()),
-                    "output_tokens": len(result.split()),
+                    "output_tokens": len(response_text.split()),
                 },
                 latency_ms=latency,
                 success=True,
@@ -1321,7 +1364,7 @@ class MLXProvider(BaseProvider):
             )
 
     def _format_messages(self, messages: list[dict[str, Any]]) -> str:
-        """Convert chat messages to a single prompt string"""
+        """Convert chat messages to a single prompt string (fallback)"""
         parts = []
         for msg in messages:
             role = msg.get("role", "user")
@@ -1333,36 +1376,6 @@ class MLXProvider(BaseProvider):
             else:
                 parts.append(f"User: {content}")
         return "\n\n".join(parts)
-
-    def _run_mlx_command(self, prompt: str, max_tokens: int, temperature: float) -> str:
-        """Execute the MLX command and return the response"""
-        import subprocess
-
-        # Build command with common MLX-LM arguments
-        cmd = [
-            self.command,
-            "--prompt",
-            prompt,
-        ]
-
-        # Add optional parameters if the command supports them
-        # These are common flags for MLX-LM based tools
-        if max_tokens:
-            cmd.extend(["--max-tokens", str(max_tokens)])
-        if temperature != 0.7:  # Only add if non-default
-            cmd.extend(["--temp", str(temperature)])
-
-        result = subprocess.run(  # noqa: S603
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minute timeout for long generations
-        )
-
-        if result.returncode != 0:
-            raise RuntimeError(f"MLX command failed: {result.stderr}")
-
-        return result.stdout.strip()
 
 
 # Provider characteristics registry for intelligent model selection
@@ -2215,7 +2228,7 @@ class ModelRegistry:
         "mlx-llama8": ModelCapability(
             name="MLX Llama 8B",
             provider="mlx",
-            model_id="mlx-llama8",
+            model_id="mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
             task_types=(
                 TaskType.GENERAL_NLP,
                 TaskType.LOCAL_MODEL,
