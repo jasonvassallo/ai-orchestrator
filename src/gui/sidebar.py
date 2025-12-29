@@ -15,16 +15,15 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
-    QLabel,
+    QInputDialog,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
-    QMessageBox,
-    QInputDialog,
 )
 
 from .styles import COLORS
@@ -73,13 +72,13 @@ class ConversationList(QListWidget):
                 padding: 12px 16px;
                 border-radius: 8px;
                 margin: 2px 8px;
-                color: {COLORS['text_primary']};
+                color: {COLORS["text_primary"]};
             }}
             QListWidget::item:hover {{
-                background-color: {COLORS['bg_hover']};
+                background-color: {COLORS["bg_hover"]};
             }}
             QListWidget::item:selected {{
-                background-color: {COLORS['bg_active']};
+                background-color: {COLORS["bg_active"]};
             }}
         """)
 
@@ -97,18 +96,18 @@ class ConversationList(QListWidget):
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
-                background-color: {COLORS['bg_secondary']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_secondary"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 8px;
                 padding: 4px;
             }}
             QMenu::item {{
                 padding: 8px 24px;
                 border-radius: 4px;
-                color: {COLORS['text_primary']};
+                color: {COLORS["text_primary"]};
             }}
             QMenu::item:selected {{
-                background-color: {COLORS['bg_active']};
+                background-color: {COLORS["bg_active"]};
             }}
         """)
 
@@ -173,8 +172,8 @@ class Sidebar(QFrame):
         header = QFrame()
         header.setStyleSheet(f"""
             QFrame {{
-                background-color: {COLORS['bg_secondary']};
-                border-bottom: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_secondary"]};
+                border-bottom: 1px solid {COLORS["border"]};
             }}
         """)
         header_layout = QVBoxLayout(header)
@@ -185,7 +184,7 @@ class Sidebar(QFrame):
         self.new_chat_btn = QPushButton("+ New Chat")
         self.new_chat_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['button_primary']};
+                background-color: {COLORS["button_primary"]};
                 color: white;
                 border: none;
                 border-radius: 8px;
@@ -194,7 +193,7 @@ class Sidebar(QFrame):
                 font-size: 14px;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['button_primary_hover']};
+                background-color: {COLORS["button_primary_hover"]};
             }}
         """)
         self.new_chat_btn.clicked.connect(self.newChatClicked.emit)
@@ -205,14 +204,14 @@ class Sidebar(QFrame):
         self.search_input.setPlaceholderText("Search conversations...")
         self.search_input.setStyleSheet(f"""
             QLineEdit {{
-                background-color: {COLORS['bg_tertiary']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_tertiary"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 6px;
                 padding: 8px 12px;
-                color: {COLORS['text_primary']};
+                color: {COLORS["text_primary"]};
             }}
             QLineEdit:focus {{
-                border-color: {COLORS['border_focus']};
+                border-color: {COLORS["border_focus"]};
             }}
         """)
         self.search_input.textChanged.connect(self._on_search)
@@ -222,17 +221,23 @@ class Sidebar(QFrame):
 
         # Conversation list
         self.conversation_list = ConversationList()
-        self.conversation_list.conversationSelected.connect(self.conversationSelected.emit)
-        self.conversation_list.conversationDeleted.connect(self.conversationDeleted.emit)
-        self.conversation_list.conversationRenamed.connect(self.conversationRenamed.emit)
+        self.conversation_list.conversationSelected.connect(
+            self.conversationSelected.emit
+        )
+        self.conversation_list.conversationDeleted.connect(
+            self.conversationDeleted.emit
+        )
+        self.conversation_list.conversationRenamed.connect(
+            self.conversationRenamed.emit
+        )
         layout.addWidget(self.conversation_list)
 
         # Footer with settings
         footer = QFrame()
         footer.setStyleSheet(f"""
             QFrame {{
-                background-color: {COLORS['bg_secondary']};
-                border-top: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_secondary"]};
+                border-top: 1px solid {COLORS["border"]};
             }}
         """)
         footer_layout = QHBoxLayout(footer)
@@ -242,12 +247,12 @@ class Sidebar(QFrame):
         settings_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
-                color: {COLORS['text_secondary']};
+                color: {COLORS["text_secondary"]};
                 border: none;
                 padding: 8px;
             }}
             QPushButton:hover {{
-                color: {COLORS['text_primary']};
+                color: {COLORS["text_primary"]};
             }}
         """)
         settings_btn.clicked.connect(self.settingsClicked.emit)
@@ -260,8 +265,8 @@ class Sidebar(QFrame):
         # Styling
         self.setStyleSheet(f"""
             QFrame#sidebar {{
-                background-color: {COLORS['bg_secondary']};
-                border-right: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_secondary"]};
+                border-right: 1px solid {COLORS["border"]};
             }}
         """)
 
@@ -332,7 +337,10 @@ class Sidebar(QFrame):
         """Select a conversation by ID."""
         for i in range(self.conversation_list.count()):
             item = self.conversation_list.item(i)
-            if isinstance(item, ConversationItem) and item.conversation.id == conversation_id:
+            if (
+                isinstance(item, ConversationItem)
+                and item.conversation.id == conversation_id
+            ):
                 self.conversation_list.setCurrentItem(item)
                 break
 

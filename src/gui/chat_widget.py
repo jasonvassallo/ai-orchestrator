@@ -10,22 +10,22 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QFont, QTextCursor, QAction
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QAction, QFont
 from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
-    QApplication,
-    QMenu,
-    QFileDialog,
-    QMessageBox,
 )
 
 from .styles import COLORS
@@ -51,7 +51,7 @@ class CodeBlockWidget(QFrame):
         # Header with language and copy button
         header = QFrame()
         header.setStyleSheet(f"""
-            background-color: {COLORS['bg_hover']};
+            background-color: {COLORS["bg_hover"]};
             border-top-left-radius: 6px;
             border-top-right-radius: 6px;
             padding: 4px 8px;
@@ -69,13 +69,13 @@ class CodeBlockWidget(QFrame):
         copy_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
-                color: {COLORS['text_secondary']};
+                color: {COLORS["text_secondary"]};
                 border: none;
                 padding: 2px 8px;
                 font-size: 12px;
             }}
             QPushButton:hover {{
-                color: {COLORS['text_primary']};
+                color: {COLORS["text_primary"]};
             }}
         """)
         copy_btn.clicked.connect(self._copy_code)
@@ -89,14 +89,14 @@ class CodeBlockWidget(QFrame):
         code_edit.setReadOnly(True)
         code_edit.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {COLORS['bg_tertiary']};
+                background-color: {COLORS["bg_tertiary"]};
                 border: none;
                 border-bottom-left-radius: 6px;
                 border-bottom-right-radius: 6px;
                 padding: 12px;
                 font-family: "SF Mono", "Menlo", "Monaco", monospace;
                 font-size: 13px;
-                color: {COLORS['text_primary']};
+                color: {COLORS["text_primary"]};
             }}
         """)
         code_edit.setFont(QFont("SF Mono", 13))
@@ -140,18 +140,18 @@ class MessageBubble(QFrame):
         menu = QMenu(self)
         menu.setStyleSheet(f"""
             QMenu {{
-                background-color: {COLORS['bg_secondary']};
-                border: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_secondary"]};
+                border: 1px solid {COLORS["border"]};
                 border-radius: 8px;
                 padding: 4px;
             }}
             QMenu::item {{
                 padding: 8px 24px;
                 border-radius: 4px;
-                color: {COLORS['text_primary']};
+                color: {COLORS["text_primary"]};
             }}
             QMenu::item:selected {{
-                background-color: {COLORS['bg_active']};
+                background-color: {COLORS["bg_active"]};
             }}
         """)
 
@@ -185,7 +185,7 @@ class MessageBubble(QFrame):
         role_text = "You" if self.role == "user" else "Assistant"
         role_label = QLabel(role_text)
         role_label.setStyleSheet(f"""
-            color: {COLORS['text_secondary']};
+            color: {COLORS["text_secondary"]};
             font-size: 12px;
             font-weight: 600;
         """)
@@ -195,7 +195,7 @@ class MessageBubble(QFrame):
         self._render_content(layout)
 
         # Styling based on role
-        bg_color = COLORS['user_bg'] if self.role == "user" else COLORS['assistant_bg']
+        bg_color = COLORS["user_bg"] if self.role == "user" else COLORS["assistant_bg"]
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {bg_color};
@@ -206,12 +206,12 @@ class MessageBubble(QFrame):
     def _render_content(self, layout: QVBoxLayout) -> None:
         """Render content with markdown support."""
         # Split content into code blocks and text
-        parts = re.split(r'(```[\w]*\n[\s\S]*?```)', self.content)
+        parts = re.split(r"(```[\w]*\n[\s\S]*?```)", self.content)
 
         for part in parts:
-            if part.startswith('```'):
+            if part.startswith("```"):
                 # Code block
-                match = re.match(r'```(\w*)\n([\s\S]*?)```', part)
+                match = re.match(r"```(\w*)\n([\s\S]*?)```", part)
                 if match:
                     language = match.group(1)
                     code = match.group(2).rstrip()
@@ -224,7 +224,7 @@ class MessageBubble(QFrame):
                 text_label.setTextFormat(Qt.TextFormat.RichText)
                 text_label.setOpenExternalLinks(True)
                 text_label.setStyleSheet(f"""
-                    color: {COLORS['text_primary']};
+                    color: {COLORS["text_primary"]};
                     line-height: 1.5;
                 """)
 
@@ -242,16 +242,16 @@ class MessageBubble(QFrame):
         text = text.replace(">", "&gt;")
 
         # Bold: **text** or __text__
-        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
-        text = re.sub(r'__(.+?)__', r'<b>\1</b>', text)
+        text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+        text = re.sub(r"__(.+?)__", r"<b>\1</b>", text)
 
         # Italic: *text* or _text_
-        text = re.sub(r'\*(.+?)\*', r'<i>\1</i>', text)
-        text = re.sub(r'_(.+?)_', r'<i>\1</i>', text)
+        text = re.sub(r"\*(.+?)\*", r"<i>\1</i>", text)
+        text = re.sub(r"_(.+?)_", r"<i>\1</i>", text)
 
         # Inline code: `code`
         text = re.sub(
-            r'`([^`]+)`',
+            r"`([^`]+)`",
             rf'<code style="background-color: {COLORS["bg_tertiary"]}; '
             rf'padding: 2px 6px; border-radius: 4px; font-family: monospace;">\1</code>',
             text,
@@ -259,7 +259,7 @@ class MessageBubble(QFrame):
 
         # Links: [text](url)
         text = re.sub(
-            r'\[([^\]]+)\]\(([^)]+)\)',
+            r"\[([^\]]+)\]\(([^)]+)\)",
             rf'<a href="\2" style="color: {COLORS["text_accent"]};">\1</a>',
             text,
         )
@@ -303,7 +303,7 @@ class StreamingMessageBubble(MessageBubble):
         self._text_label.setWordWrap(True)
         self._text_label.setTextFormat(Qt.TextFormat.PlainText)
         self._text_label.setStyleSheet(f"""
-            color: {COLORS['text_primary']};
+            color: {COLORS["text_primary"]};
             line-height: 1.5;
         """)
         layout.addWidget(self._text_label)
@@ -501,7 +501,7 @@ class WelcomeWidget(QWidget):
         title.setStyleSheet(f"""
             font-size: 32px;
             font-weight: 600;
-            color: {COLORS['text_primary']};
+            color: {COLORS["text_primary"]};
         """)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
@@ -510,7 +510,7 @@ class WelcomeWidget(QWidget):
         subtitle = QLabel("Intelligent multi-model AI assistant")
         subtitle.setStyleSheet(f"""
             font-size: 16px;
-            color: {COLORS['text_secondary']};
+            color: {COLORS["text_secondary"]};
             margin-top: 8px;
         """)
         subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)

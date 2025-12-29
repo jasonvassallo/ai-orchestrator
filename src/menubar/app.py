@@ -17,7 +17,6 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
-from typing import Callable
 
 # Check for macOS
 if sys.platform != "darwin":
@@ -49,6 +48,7 @@ class AIMenuBarApp(rumps.App):
         """Initialize the orchestrator."""
         try:
             from ..orchestrator import AIOrchestrator
+
             self.orchestrator = AIOrchestrator(verbose=False)
         except Exception as e:
             rumps.alert(
@@ -61,15 +61,34 @@ class AIMenuBarApp(rumps.App):
         self.menu = [
             rumps.MenuItem("Quick Query...", callback=self.quick_query),
             None,  # Separator
-            rumps.MenuItem("Models", [
-                rumps.MenuItem("Auto (Best)", callback=lambda _: self.set_model(None)),
-                None,
-                rumps.MenuItem("Claude Opus 4.5", callback=lambda _: self.set_model("claude-opus-4.5")),
-                rumps.MenuItem("Claude Sonnet 4.5", callback=lambda _: self.set_model("claude-sonnet-4.5")),
-                rumps.MenuItem("GPT-4o", callback=lambda _: self.set_model("gpt-4o")),
-                rumps.MenuItem("Gemini 2.0 Flash", callback=lambda _: self.set_model("gemini-2.0-flash")),
-                rumps.MenuItem("Llama 3.2 (Local)", callback=lambda _: self.set_model("llama3.2")),
-            ]),
+            rumps.MenuItem(
+                "Models",
+                [
+                    rumps.MenuItem(
+                        "Auto (Best)", callback=lambda _: self.set_model(None)
+                    ),
+                    None,
+                    rumps.MenuItem(
+                        "Claude Opus 4.5",
+                        callback=lambda _: self.set_model("claude-opus-4.5"),
+                    ),
+                    rumps.MenuItem(
+                        "Claude Sonnet 4.5",
+                        callback=lambda _: self.set_model("claude-sonnet-4.5"),
+                    ),
+                    rumps.MenuItem(
+                        "GPT-4o", callback=lambda _: self.set_model("gpt-4o")
+                    ),
+                    rumps.MenuItem(
+                        "Gemini 2.0 Flash",
+                        callback=lambda _: self.set_model("gemini-2.0-flash"),
+                    ),
+                    rumps.MenuItem(
+                        "Llama 3.2 (Local)",
+                        callback=lambda _: self.set_model("llama3.2"),
+                    ),
+                ],
+            ),
             None,
             rumps.MenuItem("Open GUI App", callback=self.open_gui),
             rumps.MenuItem("Open Terminal UI", callback=self.open_tui),
@@ -110,13 +129,16 @@ class AIMenuBarApp(rumps.App):
 
     def _run_query(self, query: str) -> None:
         """Run a query in a background thread."""
+
         def run_async():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
                 if self.orchestrator:
                     result = loop.run_until_complete(
-                        self.orchestrator.query(query, model_override=self.selected_model)
+                        self.orchestrator.query(
+                            query, model_override=self.selected_model
+                        )
                     )
                     # Show result in a dialog (truncated for notification)
                     content = result.content
@@ -145,8 +167,9 @@ class AIMenuBarApp(rumps.App):
     def open_gui(self, _) -> None:
         """Open the GUI application."""
         import subprocess
+
         try:
-            subprocess.Popen([sys.executable, "-m", "src.gui.app"])
+            subprocess.Popen([sys.executable, "-m", "src.gui.app"])  # noqa: S603
             rumps.notification(
                 title="AI Orchestrator",
                 subtitle="",
@@ -159,6 +182,7 @@ class AIMenuBarApp(rumps.App):
     def open_tui(self, _) -> None:
         """Open the terminal UI in a new Terminal window."""
         import subprocess
+
         try:
             # Open Terminal and run the TUI
             script = f'''
@@ -167,7 +191,7 @@ class AIMenuBarApp(rumps.App):
                 activate
             end tell
             '''
-            subprocess.Popen(["osascript", "-e", script])
+            subprocess.Popen(["osascript", "-e", script])  # noqa: S603
         except Exception as e:
             rumps.alert(title="Error", message=f"Could not open TUI: {e}")
 
@@ -175,6 +199,7 @@ class AIMenuBarApp(rumps.App):
     def configure_keys(self, _) -> None:
         """Open terminal to configure API keys."""
         import subprocess
+
         try:
             script = f'''
             tell application "Terminal"
@@ -182,7 +207,7 @@ class AIMenuBarApp(rumps.App):
                 activate
             end tell
             '''
-            subprocess.Popen(["osascript", "-e", script])
+            subprocess.Popen(["osascript", "-e", script])  # noqa: S603
         except Exception as e:
             rumps.alert(title="Error", message=f"Could not open configuration: {e}")
 

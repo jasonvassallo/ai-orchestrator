@@ -10,29 +10,27 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal, QObject, Slot
+from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMainWindow,
+    QMessageBox,
     QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
-    QMessageBox,
-    QMenuBar,
-    QMenu,
 )
 
+from ..storage import Conversation, get_storage
 from .chat_widget import ChatWidget, WelcomeWidget
 from .input_widget import InputWidget
-from .sidebar import Sidebar
 from .settings_dialog import SettingsDialog
-from .styles import COLORS, STYLESHEET
-from ..storage import ConversationStorage, get_storage, Conversation
+from .sidebar import Sidebar
+from .styles import STYLESHEET
 
 if TYPE_CHECKING:
-    from ..orchestrator import AIOrchestrator, APIResponse
+    from ..orchestrator import AIOrchestrator
 
 
 class AsyncWorker(QObject):
@@ -196,6 +194,7 @@ class MainWindow(QMainWindow):
     def _copy_last_response(self) -> None:
         """Copy the last assistant response to clipboard."""
         from PySide6.QtWidgets import QApplication
+
         messages = self.chat_widget._messages
         for msg in reversed(messages):
             if msg.role == "assistant":
@@ -230,6 +229,7 @@ class MainWindow(QMainWindow):
         """Initialize the AI orchestrator."""
         try:
             from ..orchestrator import AIOrchestrator
+
             self._orchestrator = AIOrchestrator(verbose=False)
         except Exception as e:
             QMessageBox.warning(
@@ -263,7 +263,10 @@ class MainWindow(QMainWindow):
     def _delete_conversation(self, conversation_id: str) -> None:
         """Delete a conversation."""
         self._storage.delete_conversation(conversation_id)
-        if self._current_conversation and self._current_conversation.id == conversation_id:
+        if (
+            self._current_conversation
+            and self._current_conversation.id == conversation_id
+        ):
             self._new_chat()
 
     def _rename_conversation(self, conversation_id: str, new_title: str) -> None:
@@ -307,7 +310,9 @@ class MainWindow(QMainWindow):
         # Auto-title if this is the first message
         if len(self._current_conversation.messages) == 0:
             title = message[:50] + "..." if len(message) > 50 else message
-            self._storage.update_conversation(self._current_conversation.id, title=title)
+            self._storage.update_conversation(
+                self._current_conversation.id, title=title
+            )
 
         # Start processing
         self._is_processing = True
@@ -393,14 +398,16 @@ class MainWindow(QMainWindow):
     async def _generate_music_files(self, params: dict, streaming_bubble) -> None:
         """Generate actual music files from parameters."""
         try:
-            from ..music import MusicParameters, generate_music, format_music_result
+            from ..music import MusicParameters, format_music_result, generate_music
 
             # Parse parameters
             music_params = MusicParameters.from_dict(params)
 
             # Show generating message
             streaming_bubble.content = "Generating music...\n\n"
-            streaming_bubble.content += f"Key: {music_params.key} {music_params.scale}\n"
+            streaming_bubble.content += (
+                f"Key: {music_params.key} {music_params.scale}\n"
+            )
             streaming_bubble.content += f"BPM: {music_params.bpm}\n"
             streaming_bubble.content += f"Genre: {music_params.genre}\n"
 

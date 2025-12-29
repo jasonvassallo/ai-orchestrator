@@ -14,21 +14,21 @@ Or after installation:
 
 from __future__ import annotations
 
-import sys
 import asyncio
-from typing import TYPE_CHECKING
 
 # Ensure Qt platform is set for macOS
 import os
+import sys
+
 os.environ.setdefault("QT_MAC_WANTS_LAYER", "1")
 
 
 def main() -> int:
     """Main entry point for the GUI application."""
     try:
-        from PySide6.QtWidgets import QApplication
         from PySide6.QtCore import Qt
         from PySide6.QtGui import QFont
+        from PySide6.QtWidgets import QApplication
     except ImportError:
         print("Error: PySide6 is required for the GUI app.")
         print("Install it with: pip install pyside6")

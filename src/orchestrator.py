@@ -25,13 +25,14 @@ import re
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Callable, Coroutine, Union, TYPE_CHECKING, Deque
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from google.oauth2 import service_account
     from google.auth import credentials as auth_credentials
+    from google.oauth2 import service_account
 
 # Import our secure credential manager
 from .credentials import get_api_key
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 class TaskType(Enum):
     """Enumeration of task types the orchestrator can handle"""
+
     GENERAL_NLP = auto()
     LONG_CONTEXT = auto()
     CODE_GENERATION = auto()
@@ -60,6 +62,7 @@ class TaskType(Enum):
 @dataclass(frozen=True)
 class ModelCapability:
     """Immutable model capability definition"""
+
     name: str
     provider: str
     model_id: str
@@ -79,13 +82,14 @@ class ProviderCharacteristics:
     """
     Captures the nuanced strengths and weaknesses of AI providers.
     Used for intelligent model selection based on prompt characteristics.
-    
+
     Based on comparative analysis of model capabilities:
     - strengths: Areas where this provider excels
     - weaknesses: Known limitations to consider
     - best_for: Specific use cases where this provider shines
     - avoid_for: Use cases where other providers are preferable
     """
+
     provider: str
     strengths: tuple[str, ...]
     weaknesses: tuple[str, ...]
@@ -105,8 +109,9 @@ class ProviderCharacteristics:
 @dataclass
 class RateLimitState:
     """Track rate limiting state per provider"""
-    requests: Deque[float] = field(default_factory=deque)
-    tokens: Deque[tuple[float, int]] = field(default_factory=deque)
+
+    requests: deque[float] = field(default_factory=deque)
+    tokens: deque[tuple[float, int]] = field(default_factory=deque)
     max_requests_per_minute: int = 60
     max_tokens_per_minute: int = 100000
 
@@ -114,6 +119,7 @@ class RateLimitState:
 @dataclass
 class APIResponse:
     """Standardized API response container"""
+
     content: str
     model: str
     provider: str
@@ -153,9 +159,7 @@ class InputValidator:
         # Check for suspicious patterns (log but don't block - could be legitimate code)
         for pattern in cls.SUSPICIOUS_PATTERNS:
             if re.search(pattern, prompt, re.IGNORECASE):
-                logger.warning(
-                    f"Potentially suspicious pattern in prompt: {pattern}"
-                )
+                logger.warning(f"Potentially suspicious pattern in prompt: {pattern}")
 
         return True, ""
 
@@ -187,10 +191,10 @@ class InputValidator:
         sanitized = text[:max_len]
         # Redact anything that looks like an API key
         sanitized = re.sub(
-            r'(sk-|api[_-]?key|bearer\s+)[a-zA-Z0-9\-_]{20,}',
-            '[REDACTED]',
+            r"(sk-|api[_-]?key|bearer\s+)[a-zA-Z0-9\-_]{20,}",
+            "[REDACTED]",
             sanitized,
-            flags=re.IGNORECASE
+            flags=re.IGNORECASE,
         )
         return sanitized + ("..." if len(text) > max_len else "")
 
@@ -207,11 +211,7 @@ class RateLimiter:
             self._states[provider] = RateLimitState()
         return self._states[provider]
 
-    async def check_and_wait(
-        self,
-        provider: str,
-        estimated_tokens: int = 1000
-    ) -> bool:
+    async def check_and_wait(self, provider: str, estimated_tokens: int = 1000) -> bool:
         """Check rate limits and wait if necessary"""
         async with self._lock:
             state = self._get_state(provider)
@@ -235,7 +235,9 @@ class RateLimiter:
             current_tokens = sum(t[1] for t in state.tokens)
             if current_tokens + estimated_tokens > state.max_tokens_per_minute:
                 wait_time = state.tokens[0][0] - window_start if state.tokens else 1
-                logger.info(f"Token rate limited on {provider}, waiting {wait_time:.1f}s")
+                logger.info(
+                    f"Token rate limited on {provider}, waiting {wait_time:.1f}s"
+                )
                 await asyncio.sleep(wait_time)
                 return await self.check_and_wait(provider, estimated_tokens)
 
@@ -285,19 +287,19 @@ class RetryHandler:
                 if attempt == max_retries or not cls.is_retryable(error_str):
                     raise
 
-                delay = min(base_delay * (2 ** attempt), max_delay)
+                delay = min(base_delay * (2**attempt), max_delay)
                 # Add jitter
-                delay *= (0.5 + 0.5 * (hash(str(time.time())) % 100) / 100)
+                delay *= 0.5 + 0.5 * (hash(str(time.time())) % 100) / 100
 
                 logger.warning(
                     f"Retrying after error (attempt {attempt + 1}): "
                     f"{InputValidator.sanitize_for_logging(error_str)}"
                 )
                 await asyncio.sleep(delay)
-        
+
         if last_error:
             raise last_error
-        
+
         # This part should ideally not be reached if func always returns or raises.
         # Added for type safety to guarantee a return value.
         raise RuntimeError("Retry logic finished without returning or raising.")
@@ -322,10 +324,7 @@ class BaseProvider(ABC):
 
     @abstractmethod
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         """Send completion request"""
         pass
@@ -346,6 +345,7 @@ class OpenAIProvider(BaseProvider):
 
         try:
             from openai import AsyncOpenAI
+
             self._client = AsyncOpenAI(api_key=api_key)
             return True
         except ImportError:
@@ -353,10 +353,7 @@ class OpenAIProvider(BaseProvider):
             return False
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
@@ -417,6 +414,7 @@ class AnthropicProvider(BaseProvider):
 
         try:
             import anthropic
+
             self._client = anthropic.AsyncAnthropic(api_key=api_key)
             return True
         except ImportError:
@@ -424,10 +422,7 @@ class AnthropicProvider(BaseProvider):
             return False
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
@@ -487,7 +482,7 @@ class AnthropicProvider(BaseProvider):
 
 
 class GoogleProvider(BaseProvider):
-    """Google Gemini API provider"""
+    """Google Gemini API provider using the new google-genai SDK"""
 
     @property
     def provider_name(self) -> str:
@@ -500,12 +495,12 @@ class GoogleProvider(BaseProvider):
             return False
 
         try:
-            import google.generativeai as genai
-            genai.configure(api_key=api_key)
-            self._genai = genai
+            from google import genai
+
+            self._client = genai.Client(api_key=api_key)
             return True
         except ImportError:
-            logger.error("google-generativeai package not installed")
+            logger.error("google-genai package not installed")
             return False
 
     async def complete(
@@ -514,35 +509,39 @@ class GoogleProvider(BaseProvider):
         model: str,
         **kwargs: Any,
     ) -> APIResponse:
-        if not hasattr(self, "_genai"):
+        if not self._client:
             await self.initialize()
+        assert self._client is not None
 
         start_time = time.time()
 
         try:
             await self.rate_limiter.check_and_wait(self.provider_name, 1000)
 
-            gemini_model = self._genai.GenerativeModel(model)
-
             # Convert messages to Gemini format
-            prompt = "\n".join(
-                f"{msg['role']}: {msg['content']}" for msg in messages
-            )
+            prompt = "\n".join(f"{msg['role']}: {msg['content']}" for msg in messages)
 
-            response = await asyncio.to_thread(
-                gemini_model.generate_content, prompt
+            # Use native async API
+            response = await self._client.aio.models.generate_content(
+                model=model,
+                contents=prompt,
             )
 
             latency = (time.time() - start_time) * 1000
+
+            # Extract usage metadata
+            usage: dict[str, Any] = {}
+            if hasattr(response, "usage_metadata") and response.usage_metadata:
+                usage = {
+                    "input_tokens": response.usage_metadata.prompt_token_count,
+                    "output_tokens": response.usage_metadata.candidates_token_count,
+                }
 
             return APIResponse(
                 content=response.text,
                 model=model,
                 provider=self.provider_name,
-                usage={
-                    "input_tokens": response.usage_metadata.prompt_token_count,
-                    "output_tokens": response.usage_metadata.candidates_token_count,
-                },
+                usage=usage,
                 latency_ms=latency,
                 success=True,
             )
@@ -575,9 +574,7 @@ class VertexAIProvider(BaseProvider):
         super().__init__(rate_limiter)
         self.project_id = project_id
         self.location = location
-        self._credentials: Union[
-            "auth_credentials.Credentials", "service_account.Credentials", None
-        ] = None
+        self._credentials: auth_credentials.Credentials | service_account.Credentials | None = None
 
     @property
     def provider_name(self) -> str:
@@ -586,18 +583,21 @@ class VertexAIProvider(BaseProvider):
     async def initialize(self) -> bool:
         """Initialize Vertex AI with service account credentials"""
         try:
-            import google.auth
-            from google.auth.transport.requests import Request
             import os
 
+            import google.auth
+
             # Get credentials from environment or default
-            credentials_path = os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')
+            credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 
             if credentials_path and os.path.exists(credentials_path):
                 from google.oauth2 import service_account
-                self._credentials = service_account.Credentials.from_service_account_file(
-                    credentials_path,
-                    scopes=['https://www.googleapis.com/auth/cloud-platform']
+
+                self._credentials = (
+                    service_account.Credentials.from_service_account_file(
+                        credentials_path,
+                        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+                    )
                 )
                 logger.info(f"Loaded Vertex AI credentials from {credentials_path}")
             else:
@@ -605,7 +605,7 @@ class VertexAIProvider(BaseProvider):
                 creds: Any
                 project: Any
                 creds, project = google.auth.default(
-                    scopes=['https://www.googleapis.com/auth/cloud-platform']
+                    scopes=["https://www.googleapis.com/auth/cloud-platform"]
                 )
                 self._credentials = creds
                 if not self.project_id:
@@ -613,22 +613,31 @@ class VertexAIProvider(BaseProvider):
                 logger.info("Using application default credentials for Vertex AI")
 
             if not self.project_id:
-                self.project_id = os.environ.get('GCP_PROJECT_ID') or os.environ.get('GOOGLE_CLOUD_PROJECT')
+                self.project_id = os.environ.get("GCP_PROJECT_ID") or os.environ.get(
+                    "GOOGLE_CLOUD_PROJECT"
+                )
 
             if not self.project_id:
-                logger.error("GCP project ID not configured. Set GCP_PROJECT_ID or GOOGLE_CLOUD_PROJECT")
+                logger.error(
+                    "GCP project ID not configured. Set GCP_PROJECT_ID or GOOGLE_CLOUD_PROJECT"
+                )
                 return False
 
             # Initialize HTTP client
             import httpx
+
             self._client = httpx.AsyncClient(timeout=120.0)
 
-            logger.info(f"Vertex AI initialized for project: {self.project_id}, location: {self.location}")
+            logger.info(
+                f"Vertex AI initialized for project: {self.project_id}, location: {self.location}"
+            )
             return True
 
         except ImportError as e:
             logger.error(f"Missing dependencies for Vertex AI: {e}")
-            logger.error("Install with: pip install google-cloud-aiplatform google-auth")
+            logger.error(
+                "Install with: pip install google-cloud-aiplatform google-auth"
+            )
             return False
         except Exception as e:
             logger.error(f"Failed to initialize Vertex AI: {e}")
@@ -656,10 +665,7 @@ class VertexAIProvider(BaseProvider):
         )
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
@@ -697,7 +703,7 @@ class VertexAIProvider(BaseProvider):
                 "generationConfig": {
                     "temperature": kwargs.get("temperature", 0.7),
                     "maxOutputTokens": kwargs.get("max_tokens", 4096),
-                }
+                },
             }
 
             # Make request
@@ -707,7 +713,7 @@ class VertexAIProvider(BaseProvider):
                     "Authorization": f"Bearer {access_token}",
                     "Content-Type": "application/json",
                 },
-                json=request_body
+                json=request_body,
             )
             response.raise_for_status()
             data = response.json()
@@ -734,7 +740,7 @@ class VertexAIProvider(BaseProvider):
                 },
                 latency_ms=latency,
                 success=True,
-                metadata={"endpoint_url": url}
+                metadata={"endpoint_url": url},
             )
 
         except Exception as e:
@@ -752,7 +758,9 @@ class VertexAIProvider(BaseProvider):
 class OllamaProvider(BaseProvider):
     """Ollama local model provider"""
 
-    def __init__(self, rate_limiter: RateLimiter, base_url: str = "http://localhost:11434"):
+    def __init__(
+        self, rate_limiter: RateLimiter, base_url: str = "http://localhost:11434"
+    ):
         super().__init__(rate_limiter)
         self.base_url = base_url
 
@@ -763,6 +771,7 @@ class OllamaProvider(BaseProvider):
     async def initialize(self) -> bool:
         try:
             import httpx
+
             self._client = httpx.AsyncClient(base_url=self.base_url, timeout=120.0)
             # Test connection
             response = await self._client.get("/api/version")
@@ -772,10 +781,7 @@ class OllamaProvider(BaseProvider):
             return False
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
@@ -790,7 +796,7 @@ class OllamaProvider(BaseProvider):
                     "model": model,
                     "messages": messages,
                     "stream": False,
-                }
+                },
             )
             response.raise_for_status()
             data = response.json()
@@ -835,6 +841,7 @@ class MistralProvider(BaseProvider):
 
         try:
             import httpx
+
             self._client = httpx.AsyncClient(
                 base_url="https://api.mistral.ai",
                 headers={
@@ -849,10 +856,7 @@ class MistralProvider(BaseProvider):
             return False
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
@@ -873,7 +877,7 @@ class MistralProvider(BaseProvider):
                     "messages": messages,
                     "max_tokens": kwargs.get("max_tokens", 4096),
                     "temperature": kwargs.get("temperature", 0.7),
-                }
+                },
             )
             response.raise_for_status()
             data = response.json()
@@ -918,6 +922,7 @@ class GroqProvider(BaseProvider):
 
         try:
             import httpx
+
             self._client = httpx.AsyncClient(
                 base_url="https://api.groq.com/openai",
                 headers={
@@ -932,10 +937,7 @@ class GroqProvider(BaseProvider):
             return False
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
@@ -956,7 +958,7 @@ class GroqProvider(BaseProvider):
                     "messages": messages,
                     "max_tokens": kwargs.get("max_tokens", 4096),
                     "temperature": kwargs.get("temperature", 0.7),
-                }
+                },
             )
             response.raise_for_status()
             data = response.json()
@@ -1001,6 +1003,7 @@ class XAIProvider(BaseProvider):
 
         try:
             import httpx
+
             self._client = httpx.AsyncClient(
                 base_url="https://api.x.ai",
                 headers={
@@ -1015,10 +1018,7 @@ class XAIProvider(BaseProvider):
             return False
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
@@ -1039,7 +1039,7 @@ class XAIProvider(BaseProvider):
                     "messages": messages,
                     "max_tokens": kwargs.get("max_tokens", 4096),
                     "temperature": kwargs.get("temperature", 0.7),
-                }
+                },
             )
             response.raise_for_status()
             data = response.json()
@@ -1084,6 +1084,7 @@ class PerplexityProvider(BaseProvider):
 
         try:
             import httpx
+
             self._client = httpx.AsyncClient(
                 base_url="https://api.perplexity.ai",
                 headers={
@@ -1098,10 +1099,7 @@ class PerplexityProvider(BaseProvider):
             return False
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
@@ -1122,7 +1120,7 @@ class PerplexityProvider(BaseProvider):
                     "messages": messages,
                     "max_tokens": kwargs.get("max_tokens", 4096),
                     "temperature": kwargs.get("temperature", 0.7),
-                }
+                },
             )
             response.raise_for_status()
             data = response.json()
@@ -1167,6 +1165,7 @@ class DeepSeekProvider(BaseProvider):
 
         try:
             import httpx
+
             self._client = httpx.AsyncClient(
                 base_url="https://api.deepseek.com",
                 headers={
@@ -1181,10 +1180,7 @@ class DeepSeekProvider(BaseProvider):
             return False
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
@@ -1205,7 +1201,7 @@ class DeepSeekProvider(BaseProvider):
                     "messages": messages,
                     "max_tokens": kwargs.get("max_tokens", 4096),
                     "temperature": kwargs.get("temperature", 0.7),
-                }
+                },
             )
             response.raise_for_status()
             data = response.json()
@@ -1238,7 +1234,7 @@ class DeepSeekProvider(BaseProvider):
 class MLXProvider(BaseProvider):
     """
     MLX local model provider for Apple Silicon.
-    
+
     Invokes the mlx-llama8 command-line tool for inference.
     This provider is designed for local, private, offline inference
     on Mac devices with Apple Silicon (M1/M2/M3/M4).
@@ -1257,16 +1253,16 @@ class MLXProvider(BaseProvider):
         """Check if mlx-llama8 command is available"""
         import shutil
         import subprocess
-        
+
         # Check if command exists
         if shutil.which(self.command):
             self._available = True
             logger.info(f"MLX provider initialized with command: {self.command}")
             return True
-        
+
         # Try running with --version or --help to verify
         try:
-            result = subprocess.run(
+            result = subprocess.run(  # noqa: S603
                 [self.command, "--help"],
                 capture_output=True,
                 timeout=5,
@@ -1275,25 +1271,20 @@ class MLXProvider(BaseProvider):
         except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.warning(f"MLX model not available: {e}")
             self._available = False
-        
+
         return self._available
 
     async def complete(
-        self,
-        messages: list[dict[str, Any]],
-        model: str,
-        **kwargs: Any
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
-        import subprocess
-        import json as json_module
-        
+
         start_time = time.time()
 
         try:
             # Convert messages to a single prompt
             # MLX models typically expect a simple text input
             prompt = self._format_messages(messages)
-            
+
             # Run the mlx-llama8 command
             # We use stdin to pass the prompt and capture stdout
             result = await asyncio.to_thread(
@@ -1302,7 +1293,7 @@ class MLXProvider(BaseProvider):
                 kwargs.get("max_tokens", 4096),
                 kwargs.get("temperature", 0.7),
             )
-            
+
             latency = (time.time() - start_time) * 1000
 
             return APIResponse(
@@ -1343,40 +1334,35 @@ class MLXProvider(BaseProvider):
                 parts.append(f"User: {content}")
         return "\n\n".join(parts)
 
-    def _run_mlx_command(
-        self, 
-        prompt: str, 
-        max_tokens: int, 
-        temperature: float
-    ) -> str:
+    def _run_mlx_command(self, prompt: str, max_tokens: int, temperature: float) -> str:
         """Execute the MLX command and return the response"""
         import subprocess
-        
+
         # Build command with common MLX-LM arguments
         cmd = [
             self.command,
-            "--prompt", prompt,
+            "--prompt",
+            prompt,
         ]
-        
+
         # Add optional parameters if the command supports them
         # These are common flags for MLX-LM based tools
         if max_tokens:
             cmd.extend(["--max-tokens", str(max_tokens)])
         if temperature != 0.7:  # Only add if non-default
             cmd.extend(["--temp", str(temperature)])
-        
-        result = subprocess.run(
+
+        result = subprocess.run(  # noqa: S603
             cmd,
             capture_output=True,
             text=True,
             timeout=300,  # 5 minute timeout for long generations
         )
-        
+
         if result.returncode != 0:
             raise RuntimeError(f"MLX command failed: {result.stderr}")
-        
-        return result.stdout.strip()
 
+        return result.stdout.strip()
 
 
 # Provider characteristics registry for intelligent model selection
@@ -1434,9 +1420,7 @@ PROVIDER_CHARACTERISTICS: dict[str, ProviderCharacteristics] = {
             "long-form content",
             "security-sensitive applications",
         ),
-        avoid_for=(
-            "simple quick tasks where speed matters most",
-        ),
+        avoid_for=("simple quick tasks where speed matters most",),
         contextual_understanding=0.95,
         creativity_originality=0.85,
         emotional_intelligence=0.7,
@@ -1624,9 +1608,7 @@ PROVIDER_CHARACTERISTICS: dict[str, ProviderCharacteristics] = {
             "high-volume processing",
             "real-time responses",
         ),
-        avoid_for=(
-            "tasks needing unique model capabilities",
-        ),
+        avoid_for=("tasks needing unique model capabilities",),
         contextual_understanding=0.75,
         creativity_originality=0.7,
         emotional_intelligence=0.5,
@@ -1738,53 +1720,54 @@ PROVIDER_CHARACTERISTICS: dict[str, ProviderCharacteristics] = {
     ),
 }
 
+
 class TaskClassifier:
     """Classify user prompts into task types"""
 
     # Keywords for each task type
     TASK_PATTERNS = {
         TaskType.CODE_GENERATION: [
-            r'\b(code|program|script|function|class|implement|develop|debug|refactor)\b',
-            r'\b(python|javascript|typescript|java|c\+\+|rust|go|ruby)\b',
-            r'\b(api|endpoint|database|sql|query|algorithm)\b',
+            r"\b(code|program|script|function|class|implement|develop|debug|refactor)\b",
+            r"\b(python|javascript|typescript|java|c\+\+|rust|go|ruby)\b",
+            r"\b(api|endpoint|database|sql|query|algorithm)\b",
         ],
         TaskType.DATA_ANALYSIS: [
-            r'\b(analyze|analysis|data|statistics|chart|graph|visualiz|csv|excel)\b',
-            r'\b(trend|pattern|correlation|regression|forecast|predict)\b',
-            r'\b(pandas|numpy|matplotlib|dataset)\b',
+            r"\b(analyze|analysis|data|statistics|chart|graph|visualiz|csv|excel)\b",
+            r"\b(trend|pattern|correlation|regression|forecast|predict)\b",
+            r"\b(pandas|numpy|matplotlib|dataset)\b",
         ],
         TaskType.DEEP_REASONING: [
-            r'\b(prove|theorem|derive|mathematical|logic|reasoning|why|how)\b',
-            r'\b(philosophy|ethics|moral|complex|multi-step|deduce)\b',
-            r'\b(research|investigate|explore|comprehensive)\b',
+            r"\b(prove|theorem|derive|mathematical|logic|reasoning|why|how)\b",
+            r"\b(philosophy|ethics|moral|complex|multi-step|deduce)\b",
+            r"\b(research|investigate|explore|comprehensive)\b",
         ],
         TaskType.CREATIVE_WRITING: [
-            r'\b(write|story|poem|essay|creative|fiction|narrative)\b',
-            r'\b(blog|article|content|copywriting|marketing)\b',
+            r"\b(write|story|poem|essay|creative|fiction|narrative)\b",
+            r"\b(blog|article|content|copywriting|marketing)\b",
         ],
         TaskType.SUMMARIZATION: [
-            r'\b(summarize|summary|tldr|brief|condense|main points)\b',
-            r'\b(key takeaways|overview|digest)\b',
+            r"\b(summarize|summary|tldr|brief|condense|main points)\b",
+            r"\b(key takeaways|overview|digest)\b",
         ],
         TaskType.LONG_CONTEXT: [
-            r'\b(document|book|paper|long|entire|whole|full text)\b',
-            r'\b(pdf|report|transcript|lengthy)\b',
+            r"\b(document|book|paper|long|entire|whole|full text)\b",
+            r"\b(pdf|report|transcript|lengthy)\b",
         ],
         TaskType.MATH: [
-            r'\b(calculate|compute|solve|equation|integral|derivative)\b',
-            r'\b(math|algebra|calculus|geometry|trigonometry)\b',
+            r"\b(calculate|compute|solve|equation|integral|derivative)\b",
+            r"\b(math|algebra|calculus|geometry|trigonometry)\b",
         ],
         TaskType.WEB_SEARCH: [
-            r'\b(search|find|look up|current|latest|news|today)\b',
-            r'\b(weather|stock|price|update)\b',
+            r"\b(search|find|look up|current|latest|news|today)\b",
+            r"\b(weather|stock|price|update)\b",
         ],
         TaskType.MULTIMODAL: [
-            r'\b(image|picture|photo|visual|diagram|screenshot)\b',
-            r'\b(describe|analyze|what.+see)\b',
+            r"\b(image|picture|photo|visual|diagram|screenshot)\b",
+            r"\b(describe|analyze|what.+see)\b",
         ],
         TaskType.LOCAL_MODEL: [
-            r'\b(private|confidential|offline|local|sensitive)\b',
-            r'\b(no cloud|internal|proprietary)\b',
+            r"\b(private|confidential|offline|local|sensitive)\b",
+            r"\b(no cloud|internal|proprietary)\b",
         ],
     }
 
@@ -1823,8 +1806,12 @@ class ModelRegistry:
             name="GPT-4o",
             provider="openai",
             model_id="gpt-4o",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
-                       TaskType.REASONING, TaskType.MULTIMODAL),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+                TaskType.MULTIMODAL,
+            ),
             context_window=128000,
             cost_per_1k_input=0.005,
             cost_per_1k_output=0.015,
@@ -1847,8 +1834,11 @@ class ModelRegistry:
             name="o1",
             provider="openai",
             model_id="o1",
-            task_types=(TaskType.DEEP_REASONING, TaskType.MATH,
-                       TaskType.CODE_GENERATION),
+            task_types=(
+                TaskType.DEEP_REASONING,
+                TaskType.MATH,
+                TaskType.CODE_GENERATION,
+            ),
             context_window=200000,
             cost_per_1k_input=0.015,
             cost_per_1k_output=0.06,
@@ -1865,26 +1855,37 @@ class ModelRegistry:
             cost_per_1k_output=0.012,
             strengths=("reasoning", "coding", "cost-effective"),
         ),
-
         # Anthropic Models
         "claude-opus-4.5": ModelCapability(
             name="Claude Opus 4.5",
             provider="anthropic",
             model_id="claude-opus-4-5-20251101",
-            task_types=(TaskType.CODE_GENERATION, TaskType.DEEP_REASONING,
-                       TaskType.CREATIVE_WRITING, TaskType.LONG_CONTEXT),
+            task_types=(
+                TaskType.CODE_GENERATION,
+                TaskType.DEEP_REASONING,
+                TaskType.CREATIVE_WRITING,
+                TaskType.LONG_CONTEXT,
+            ),
             context_window=200000,
             cost_per_1k_input=0.015,
             cost_per_1k_output=0.075,
-            strengths=("most intelligent", "coding", "nuanced writing", "complex tasks"),
+            strengths=(
+                "most intelligent",
+                "coding",
+                "nuanced writing",
+                "complex tasks",
+            ),
             max_output_tokens=32000,
         ),
         "claude-sonnet-4.5": ModelCapability(
             name="Claude Sonnet 4.5",
             provider="anthropic",
             model_id="claude-sonnet-4-5-20250929",
-            task_types=(TaskType.CODE_GENERATION, TaskType.GENERAL_NLP,
-                       TaskType.REASONING),
+            task_types=(
+                TaskType.CODE_GENERATION,
+                TaskType.GENERAL_NLP,
+                TaskType.REASONING,
+            ),
             context_window=200000,
             cost_per_1k_input=0.003,
             cost_per_1k_output=0.015,
@@ -1902,19 +1903,27 @@ class ModelRegistry:
             strengths=("very fast", "cost-effective", "good for simple tasks"),
             max_output_tokens=8000,
         ),
-
         # Google Models
         "gemini-3-pro": ModelCapability(
             name="Gemini 3.0 Pro (Preview)",
             provider="google",
             model_id="gemini-3-pro-preview",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
-                       TaskType.REASONING, TaskType.LONG_CONTEXT,
-                       TaskType.MULTIMODAL),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+                TaskType.LONG_CONTEXT,
+                TaskType.MULTIMODAL,
+            ),
             context_window=2000000,
             cost_per_1k_input=0.0015,
             cost_per_1k_output=0.006,
-            strengths=("next-gen intelligence", "coding", "multimodal", "massive context"),
+            strengths=(
+                "next-gen intelligence",
+                "coding",
+                "multimodal",
+                "massive context",
+            ),
             supports_vision=True,
             supports_functions=True,
         ),
@@ -1922,8 +1931,12 @@ class ModelRegistry:
             name="Gemini 3.0 Flash (Preview)",
             provider="google",
             model_id="gemini-3-flash-preview",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
-                       TaskType.LONG_CONTEXT, TaskType.MULTIMODAL),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.LONG_CONTEXT,
+                TaskType.MULTIMODAL,
+            ),
             context_window=1000000,
             cost_per_1k_input=0.0001,
             cost_per_1k_output=0.0004,
@@ -1934,9 +1947,13 @@ class ModelRegistry:
             name="Gemini 2.5 Pro",
             provider="google",
             model_id="gemini-2.5-pro",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
-                       TaskType.REASONING, TaskType.LONG_CONTEXT,
-                       TaskType.MULTIMODAL),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+                TaskType.LONG_CONTEXT,
+                TaskType.MULTIMODAL,
+            ),
             context_window=2000000,
             cost_per_1k_input=0.00125,
             cost_per_1k_output=0.005,
@@ -1948,8 +1965,12 @@ class ModelRegistry:
             name="Gemini 2.5 Flash",
             provider="google",
             model_id="gemini-2.5-flash",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
-                       TaskType.LONG_CONTEXT, TaskType.MULTIMODAL),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.LONG_CONTEXT,
+                TaskType.MULTIMODAL,
+            ),
             context_window=1000000,
             cost_per_1k_input=0.0001,
             cost_per_1k_output=0.0004,
@@ -1960,8 +1981,11 @@ class ModelRegistry:
             name="Gemini 2.0 Flash",
             provider="google",
             model_id="gemini-2.0-flash",
-            task_types=(TaskType.GENERAL_NLP, TaskType.MULTIMODAL,
-                       TaskType.LONG_CONTEXT),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.MULTIMODAL,
+                TaskType.LONG_CONTEXT,
+            ),
             context_window=1000000,
             cost_per_1k_input=0.0001,
             cost_per_1k_output=0.0004,
@@ -1972,23 +1996,29 @@ class ModelRegistry:
             name="Gemini 1.5 Pro",
             provider="google",
             model_id="gemini-1.5-pro",
-            task_types=(TaskType.LONG_CONTEXT, TaskType.DATA_ANALYSIS,
-                       TaskType.MULTIMODAL),
+            task_types=(
+                TaskType.LONG_CONTEXT,
+                TaskType.DATA_ANALYSIS,
+                TaskType.MULTIMODAL,
+            ),
             context_window=2000000,
             cost_per_1k_input=0.00125,
             cost_per_1k_output=0.005,
             strengths=("2M context", "multimodal", "data analysis"),
             supports_vision=True,
         ),
-
         # Vertex AI Models (Enterprise/Third-Party Integration)
         "vertex-gemini-3-pro": ModelCapability(
             name="Gemini 3.0 Pro (Vertex AI)",
             provider="vertex-ai",
             model_id="gemini-3-pro-preview",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
-                       TaskType.REASONING, TaskType.LONG_CONTEXT,
-                       TaskType.MULTIMODAL),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+                TaskType.LONG_CONTEXT,
+                TaskType.MULTIMODAL,
+            ),
             context_window=2000000,
             cost_per_1k_input=0.0015,
             cost_per_1k_output=0.006,
@@ -2000,15 +2030,18 @@ class ModelRegistry:
             name="Gemini 2.5 Flash (Vertex AI)",
             provider="vertex-ai",
             model_id="gemini-2.5-flash",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
-                       TaskType.LONG_CONTEXT, TaskType.MULTIMODAL),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.LONG_CONTEXT,
+                TaskType.MULTIMODAL,
+            ),
             context_window=1000000,
             cost_per_1k_input=0.0001,
             cost_per_1k_output=0.0004,
             strengths=("enterprise endpoint", "fast", "stable"),
             supports_vision=True,
         ),
-
         # Local Models (Ollama)
         "llama3.2": ModelCapability(
             name="Llama 3.2",
@@ -2040,14 +2073,16 @@ class ModelRegistry:
             cost_per_1k_output=0,
             strengths=("excellent coding", "free", "private"),
         ),
-
         # Mistral Models
         "mistral-large": ModelCapability(
             name="Mistral Large",
             provider="mistral",
             model_id="mistral-large-latest",
-            task_types=(TaskType.CODE_GENERATION, TaskType.REASONING,
-                       TaskType.GENERAL_NLP),
+            task_types=(
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+                TaskType.GENERAL_NLP,
+            ),
             context_window=128000,
             cost_per_1k_input=0.002,
             cost_per_1k_output=0.006,
@@ -2074,14 +2109,16 @@ class ModelRegistry:
             cost_per_1k_output=0.0006,
             strengths=("cost-effective", "fast", "efficient"),
         ),
-
         # Groq Models (Fast inference)
         "groq-llama-3.3-70b": ModelCapability(
             name="Llama 3.3 70B (Groq)",
             provider="groq",
             model_id="llama-3.3-70b-versatile",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
-                       TaskType.REASONING),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+            ),
             context_window=128000,
             cost_per_1k_input=0.00059,
             cost_per_1k_output=0.00079,
@@ -2097,14 +2134,17 @@ class ModelRegistry:
             cost_per_1k_output=0.00024,
             strengths=("very fast", "cost-effective", "multilingual"),
         ),
-
         # xAI Models (Grok)
         "grok-2": ModelCapability(
             name="Grok 2",
             provider="xai",
             model_id="grok-2-latest",
-            task_types=(TaskType.GENERAL_NLP, TaskType.REASONING,
-                       TaskType.CODE_GENERATION, TaskType.CREATIVE_WRITING),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.REASONING,
+                TaskType.CODE_GENERATION,
+                TaskType.CREATIVE_WRITING,
+            ),
             context_window=131072,
             cost_per_1k_input=0.002,
             cost_per_1k_output=0.010,
@@ -2121,14 +2161,12 @@ class ModelRegistry:
             strengths=("vision", "real-time knowledge", "multimodal"),
             supports_vision=True,
         ),
-
         # Perplexity Models (Web search enabled)
         "perplexity-sonar-pro": ModelCapability(
             name="Sonar Pro",
             provider="perplexity",
             model_id="sonar-pro",
-            task_types=(TaskType.WEB_SEARCH, TaskType.GENERAL_NLP,
-                       TaskType.REASONING),
+            task_types=(TaskType.WEB_SEARCH, TaskType.GENERAL_NLP, TaskType.REASONING),
             context_window=200000,
             cost_per_1k_input=0.003,
             cost_per_1k_output=0.015,
@@ -2144,14 +2182,16 @@ class ModelRegistry:
             cost_per_1k_output=0.001,
             strengths=("web search", "cost-effective", "fast"),
         ),
-
         # DeepSeek Cloud Models
         "deepseek-chat": ModelCapability(
             name="DeepSeek Chat",
             provider="deepseek",
             model_id="deepseek-chat",
-            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION,
-                       TaskType.REASONING),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+            ),
             context_window=64000,
             cost_per_1k_input=0.00014,
             cost_per_1k_output=0.00028,
@@ -2161,27 +2201,36 @@ class ModelRegistry:
             name="DeepSeek Reasoner",
             provider="deepseek",
             model_id="deepseek-reasoner",
-            task_types=(TaskType.DEEP_REASONING, TaskType.MATH,
-                       TaskType.CODE_GENERATION),
+            task_types=(
+                TaskType.DEEP_REASONING,
+                TaskType.MATH,
+                TaskType.CODE_GENERATION,
+            ),
             context_window=64000,
             cost_per_1k_input=0.00055,
             cost_per_1k_output=0.00219,
             strengths=("deep reasoning", "math", "problem-solving"),
         ),
-
         # MLX Local Models (Apple Silicon optimized)
         "mlx-llama8": ModelCapability(
             name="MLX Llama 8B",
             provider="mlx",
             model_id="mlx-llama8",
-            task_types=(TaskType.GENERAL_NLP, TaskType.LOCAL_MODEL,
-                       TaskType.CODE_GENERATION),
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.LOCAL_MODEL,
+                TaskType.CODE_GENERATION,
+            ),
             context_window=8192,
             cost_per_1k_input=0,  # Free local inference
             cost_per_1k_output=0,
             strengths=(
-                "free", "private", "offline", "fast on Apple Silicon",
-                "good speed and efficiency", "objective responses",
+                "free",
+                "private",
+                "offline",
+                "fast on Apple Silicon",
+                "good speed and efficiency",
+                "objective responses",
             ),
             max_output_tokens=4096,
             supports_streaming=True,
@@ -2190,7 +2239,34 @@ class ModelRegistry:
 
     @classmethod
     def get_model(cls, model_key: str) -> ModelCapability | None:
-        return cls.MODELS.get(model_key)
+        # Allow lookups by either the registry key (recommended) or the
+        # underlying provider model id (useful for "preview"/versioned ids).
+        model = cls.MODELS.get(model_key)
+        if model is not None:
+            return model
+
+        candidates: list[tuple[str, ModelCapability]] = [
+            (key, candidate)
+            for key, candidate in cls.MODELS.items()
+            if candidate.model_id == model_key
+        ]
+        if not candidates:
+            return None
+
+        if len(candidates) == 1:
+            return candidates[0][1]
+
+        # If multiple registry entries share the same model_id (e.g. Google
+        # Gemini vs Vertex AI endpoints), prefer the non-Vertex variant.
+        non_vertex = [
+            (key, candidate)
+            for key, candidate in candidates
+            if candidate.provider != "vertex-ai" and not key.startswith("vertex-")
+        ]
+        if non_vertex:
+            return sorted(non_vertex, key=lambda item: item[0])[0][1]
+
+        return sorted(candidates, key=lambda item: item[0])[0][1]
 
     @classmethod
     def get_models_for_task(
@@ -2243,8 +2319,7 @@ class AIOrchestrator:
     def _setup_logging(self) -> None:
         level = logging.DEBUG if self.verbose else logging.INFO
         logging.basicConfig(
-            level=level,
-            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            level=level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
 
     async def _get_provider(self, provider_name: str) -> BaseProvider | None:
@@ -2293,7 +2368,7 @@ class AIOrchestrator:
     ) -> ModelCapability | None:
         """
         Select the best model for the given task types.
-        
+
         Uses a multi-factor scoring system that considers:
         1. Task type match (primary factor)
         2. Provider characteristics (strengths/weaknesses)
@@ -2308,8 +2383,7 @@ class AIOrchestrator:
 
         # Get suitable models
         candidates = ModelRegistry.get_models_for_task(
-            primary_task,
-            require_local=self.prefer_local
+            primary_task, require_local=self.prefer_local
         )
 
         if not candidates:
@@ -2331,23 +2405,41 @@ class AIOrchestrator:
             if provider_chars:
                 # Map task types to relevant provider scores
                 task_score_weights = self._get_task_score_weights(all_tasks)
-                
+
                 # Apply weighted provider characteristics
-                score += provider_chars.contextual_understanding * task_score_weights.get("contextual", 0)
-                score += provider_chars.creativity_originality * task_score_weights.get("creativity", 0)
-                score += provider_chars.emotional_intelligence * task_score_weights.get("emotional", 0)
-                score += provider_chars.speed_efficiency * task_score_weights.get("speed", 0)
-                score += provider_chars.knowledge_breadth * task_score_weights.get("knowledge", 0)
-                score += provider_chars.reasoning_depth * task_score_weights.get("reasoning", 0)
+                score += (
+                    provider_chars.contextual_understanding
+                    * task_score_weights.get("contextual", 0)
+                )
+                score += provider_chars.creativity_originality * task_score_weights.get(
+                    "creativity", 0
+                )
+                score += provider_chars.emotional_intelligence * task_score_weights.get(
+                    "emotional", 0
+                )
+                score += provider_chars.speed_efficiency * task_score_weights.get(
+                    "speed", 0
+                )
+                score += provider_chars.knowledge_breadth * task_score_weights.get(
+                    "knowledge", 0
+                )
+                score += provider_chars.reasoning_depth * task_score_weights.get(
+                    "reasoning", 0
+                )
                 score += provider_chars.code_quality * task_score_weights.get("code", 0)
-                score += provider_chars.objectivity * task_score_weights.get("objectivity", 0)
-                
+                score += provider_chars.objectivity * task_score_weights.get(
+                    "objectivity", 0
+                )
+
                 # Penalty for tasks in avoid_for list
                 for avoid_case in provider_chars.avoid_for:
                     avoid_lower = avoid_case.lower()
                     for task in all_tasks:
-                        if task.name.lower().replace("_", " ") in avoid_lower or \
-                           avoid_lower in task.name.lower().replace("_", " "):
+                        if task.name.lower().replace(
+                            "_", " "
+                        ) in avoid_lower or avoid_lower in task.name.lower().replace(
+                            "_", " "
+                        ):
                             score -= 2.0  # Penalty for mismatched use case
 
             # 3. Cost optimization
@@ -2381,7 +2473,7 @@ class AIOrchestrator:
     ) -> dict[str, float]:
         """
         Map task types to weighted provider characteristic scores.
-        
+
         Returns weights for each provider characteristic based on
         which characteristics are most relevant for the detected tasks.
         """
@@ -2395,7 +2487,7 @@ class AIOrchestrator:
             "code": 0.0,
             "objectivity": 0.5,
         }
-        
+
         for task in task_types:
             if task == TaskType.CODE_GENERATION:
                 weights["code"] += 3.0
@@ -2422,7 +2514,7 @@ class AIOrchestrator:
                 weights["contextual"] += 1.0
             elif task == TaskType.LOCAL_MODEL:
                 weights["speed"] += 1.0  # Local models prioritize speed
-        
+
         return weights
 
     async def query(
@@ -2531,7 +2623,9 @@ class AIOrchestrator:
                 )
                 # Prevent unbounded history growth
                 if len(self.conversation_history) > self._max_history_messages:
-                    self.conversation_history = self.conversation_history[-self._max_history_messages:]
+                    self.conversation_history = self.conversation_history[
+                        -self._max_history_messages :
+                    ]
             return response
         except Exception as e:
             logger.error(f"Query failed after retries: {e}")
@@ -2596,16 +2690,21 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description="AI Orchestrator CLI")
     parser.add_argument("prompt", nargs="?", help="The prompt to send")
     parser.add_argument("--model", "-m", help="Override model selection")
-    parser.add_argument("--local", "-l", action="store_true", help="Prefer local models")
+    parser.add_argument(
+        "--local", "-l", action="store_true", help="Prefer local models"
+    )
     parser.add_argument("--cheap", "-c", action="store_true", help="Optimize for cost")
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--configure", action="store_true", help="Configure API keys")
-    parser.add_argument("--list-models", action="store_true", help="List available models")
+    parser.add_argument(
+        "--list-models", action="store_true", help="List available models"
+    )
 
     args = parser.parse_args()
 
     if args.configure:
         from .credentials import configure_credentials_interactive
+
         configure_credentials_interactive()
         return
 
@@ -2617,7 +2716,9 @@ async def main() -> None:
             print(f"  Name: {model.name}")
             print(f"  Provider: {model.provider}")
             print(f"  Context: {model.context_window:,} tokens")
-            print(f"  Cost: ${model.cost_per_1k_input}/1k input, ${model.cost_per_1k_output}/1k output")
+            print(
+                f"  Cost: ${model.cost_per_1k_input}/1k input, ${model.cost_per_1k_output}/1k output"
+            )
             print(f"  Strengths: {', '.join(model.strengths)}")
         return
 
@@ -2641,7 +2742,9 @@ async def main() -> None:
         print("-" * 60)
         print(response.content)
         print("-" * 60)
-        print(f"Tokens: {response.usage.get('input_tokens', 0)} in / {response.usage.get('output_tokens', 0)} out")
+        print(
+            f"Tokens: {response.usage.get('input_tokens', 0)} in / {response.usage.get('output_tokens', 0)} out"
+        )
     else:
         print(f"\nError: {response.error}")
 

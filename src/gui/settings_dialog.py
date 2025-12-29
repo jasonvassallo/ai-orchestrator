@@ -9,22 +9,20 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QDialog,
-    QVBoxLayout,
+    QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPushButton,
-    QComboBox,
-    QCheckBox,
-    QSlider,
-    QTabWidget,
-    QWidget,
-    QGroupBox,
-    QFormLayout,
     QMessageBox,
+    QPushButton,
+    QSlider,
     QSpinBox,
-    QFrame,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .styles import COLORS
@@ -68,7 +66,7 @@ class SettingsDialog(QDialog):
         save_btn.clicked.connect(self._save_settings)
         save_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['button_primary']};
+                background-color: {COLORS["button_primary"]};
                 color: white;
                 border: none;
                 border-radius: 6px;
@@ -76,7 +74,7 @@ class SettingsDialog(QDialog):
                 font-weight: 600;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['button_primary_hover']};
+                background-color: {COLORS["button_primary_hover"]};
             }}
         """)
         button_layout.addWidget(save_btn)
@@ -100,7 +98,9 @@ class SettingsDialog(QDialog):
         self.prefer_local = QCheckBox("Prefer local models (Ollama) when available")
         behavior_layout.addRow(self.prefer_local)
 
-        self.cost_optimize = QCheckBox("Optimize for cost (use cheaper models when appropriate)")
+        self.cost_optimize = QCheckBox(
+            "Optimize for cost (use cheaper models when appropriate)"
+        )
         behavior_layout.addRow(self.cost_optimize)
 
         self.save_history = QCheckBox("Save conversation history")
@@ -125,7 +125,7 @@ class SettingsDialog(QDialog):
         temp_layout.addWidget(self.temperature)
         self.temp_label = QLabel("0.7")
         self.temperature.valueChanged.connect(
-            lambda v: self.temp_label.setText(f"{v/100:.1f}")
+            lambda v: self.temp_label.setText(f"{v / 100:.1f}")
         )
         temp_layout.addWidget(self.temp_label)
         gen_layout.addRow("Temperature:", temp_layout)
@@ -146,19 +146,21 @@ class SettingsDialog(QDialog):
         default_layout = QFormLayout(default_group)
 
         self.default_model = QComboBox()
-        self.default_model.addItems([
-            "Auto (Best for Task)",
-            "Claude Opus 4.5",
-            "Claude Sonnet 4.5",
-            "Claude Haiku 4.5",
-            "GPT-4o",
-            "GPT-4o Mini",
-            "o1",
-            "Gemini 2.0 Flash",
-            "Gemini 1.5 Pro",
-            "DeepSeek Chat",
-            "Llama 3.2 (Local)",
-        ])
+        self.default_model.addItems(
+            [
+                "Auto (Best for Task)",
+                "Claude Opus 4.5",
+                "Claude Sonnet 4.5",
+                "Claude Haiku 4.5",
+                "GPT-4o",
+                "GPT-4o Mini",
+                "o1",
+                "Gemini 2.0 Flash",
+                "Gemini 1.5 Pro",
+                "DeepSeek Chat",
+                "Llama 3.2 (Local)",
+            ]
+        )
         default_layout.addRow("Default Model:", self.default_model)
 
         layout.addWidget(default_group)
@@ -168,15 +170,21 @@ class SettingsDialog(QDialog):
         routing_layout = QFormLayout(routing_group)
 
         self.code_model = QComboBox()
-        self.code_model.addItems(["Auto", "Claude Sonnet 4.5", "GPT-4o", "DeepSeek Chat", "Codestral"])
+        self.code_model.addItems(
+            ["Auto", "Claude Sonnet 4.5", "GPT-4o", "DeepSeek Chat", "Codestral"]
+        )
         routing_layout.addRow("Coding Tasks:", self.code_model)
 
         self.reasoning_model = QComboBox()
-        self.reasoning_model.addItems(["Auto", "Claude Opus 4.5", "o1", "DeepSeek Reasoner"])
+        self.reasoning_model.addItems(
+            ["Auto", "Claude Opus 4.5", "o1", "DeepSeek Reasoner"]
+        )
         routing_layout.addRow("Reasoning Tasks:", self.reasoning_model)
 
         self.creative_model = QComboBox()
-        self.creative_model.addItems(["Auto", "Claude Opus 4.5", "GPT-4o", "Gemini 1.5 Pro"])
+        self.creative_model.addItems(
+            ["Auto", "Claude Opus 4.5", "GPT-4o", "Gemini 1.5 Pro"]
+        )
         routing_layout.addRow("Creative Tasks:", self.creative_model)
 
         layout.addWidget(routing_group)
@@ -204,6 +212,7 @@ class SettingsDialog(QDialog):
         # Check key status
         try:
             from ..credentials import get_api_key
+
             providers = [
                 ("OpenAI", "openai"),
                 ("Anthropic", "anthropic"),
@@ -263,7 +272,9 @@ class SettingsDialog(QDialog):
         theme_layout = QFormLayout(theme_group)
 
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Dark (Default)", "Light (Coming Soon)", "System (Coming Soon)"])
+        self.theme_combo.addItems(
+            ["Dark (Default)", "Light (Coming Soon)", "System (Coming Soon)"]
+        )
         self.theme_combo.setCurrentIndex(0)
         theme_layout.addRow("Theme:", self.theme_combo)
 
@@ -334,7 +345,8 @@ class SettingsDialog(QDialog):
 
         # Check MIDI availability
         try:
-            from midiutil import MIDIFile
+            from midiutil import MIDIFile  # noqa: F401
+
             midi_status = QLabel("✅ MIDI generation available")
             midi_status.setStyleSheet(f"color: {COLORS['success']};")
         except ImportError:
@@ -344,7 +356,8 @@ class SettingsDialog(QDialog):
 
         # Check MusicGen availability
         try:
-            import torch
+            import torch  # noqa: F401
+
             audio_status = QLabel("✅ Audio generation available (torch installed)")
             audio_status.setStyleSheet(f"color: {COLORS['success']};")
         except ImportError:
@@ -405,16 +418,15 @@ class SettingsDialog(QDialog):
     def _open_configure(self) -> None:
         """Open terminal to configure API keys."""
         import subprocess
-        import sys
 
         try:
-            script = f'''
+            script = """
             tell application "Terminal"
                 do script "cd && python3 -m src.credentials"
                 activate
             end tell
-            '''
-            subprocess.Popen(["osascript", "-e", script])
+            """
+            subprocess.Popen(["osascript", "-e", script])  # noqa: S603
         except Exception as e:
             QMessageBox.warning(
                 self,
@@ -435,8 +447,9 @@ class SettingsDialog(QDialog):
 
         if reply == QMessageBox.StandardButton.Yes:
             try:
-                from ..storage import get_storage_path
                 import os
+
+                from ..storage import get_storage_path
 
                 db_path = get_storage_path() / "conversations.db"
                 if db_path.exists():

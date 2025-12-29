@@ -1,10 +1,10 @@
-# CLAUDE.md
+# GEMINI.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides context and guidance for Google's Gemini models when working with this repository.
 
 ## Project Overview
 
-AI Orchestrator is an intelligent multi-model AI router written in Python. It automatically routes user queries to the best AI model based on task classification (e.g., coding, reasoning, creative writing). It supports 11 providers (OpenAI, Anthropic, Google, Vertex AI, Mistral, Groq, xAI, Perplexity, DeepSeek, Ollama, MLX) with 25+ models, featuring secure credential management and multiple UI options (CLI, GUI, TUI, Menu Bar, VS Code Extension).
+**AI Orchestrator** is an intelligent multi-model AI router written in Python. It automatically routes user queries to the best AI model based on task classification (e.g., coding, reasoning, creative writing). It supports **11 providers** (OpenAI, Anthropic, Google, Vertex AI, Mistral, Groq, xAI, Perplexity, DeepSeek, Ollama, MLX) with 25+ models, featuring secure credential management and multiple UI options.
 
 ## Common Commands
 
@@ -61,9 +61,6 @@ pytest --cov=src --cov-report=html
 
 # Run a single test file
 pytest tests/test_orchestrator.py -v
-
-# Run a specific test
-pytest tests/test_orchestrator.py::TestInputValidator::test_valid_prompt -v
 
 # Type checking (strict for core modules)
 mypy src
@@ -148,20 +145,6 @@ Three-tier fallback chain with priority order:
 4. Model → `AIOrchestrator._get_provider()` → Provider instance (lazy init)
 5. Provider → `RetryHandler.execute_with_retry()` → `APIResponse`
 
-### UI Layer
-
-All UIs use the same `AIOrchestrator` core:
-- **GUI** (`src/gui/`): PySide6 (Qt) with async via qasync
-- **TUI** (`src/tui/`): Textual framework
-- **Menu Bar** (`src/menubar/`): rumps for macOS
-- **VS Code** (`vscode-extension/`): JavaScript extension with keyboard shortcuts
-
-### Storage
-
-SQLite-based conversation persistence in `~/.ai_orchestrator/conversations.db`:
-- `ConversationStorage` class manages CRUD operations
-- Messages linked to conversations via foreign key
-
 ## Key Patterns
 
 ### Adding a New Provider
@@ -178,70 +161,34 @@ SQLite-based conversation persistence in `~/.ai_orchestrator/conversations.db`:
 ### Model Selection Algorithm
 
 Models are scored using a multi-factor system in `select_model()`:
-
-1. **Task type match** (primary factor, +10 per matched task × confidence)
-2. **Provider characteristics** - Weighted scores from `ProviderCharacteristics`:
-   - `contextual_understanding`, `creativity_originality`, `emotional_intelligence`
-   - `speed_efficiency`, `knowledge_breadth`, `reasoning_depth`, `code_quality`, `objectivity`
-3. **Avoid-for penalties** (-2.0 when task matches provider's known weaknesses)
-4. **Cost optimization** (if enabled, penalizes expensive models)
-5. **Context window bonus** (for LONG_CONTEXT tasks)
-6. **Local model bonus** (+5.0 when LOCAL_MODEL task detected and provider is local)
-
-The `_get_task_score_weights()` method maps TaskTypes to relevant characteristic weights.
-
-### Local Providers
-
-Both `ollama` and `mlx` are recognized as local providers:
-- `prefer_local=True` filters to only these providers
-- `TaskType.LOCAL_MODEL` detection gives them a scoring bonus
-- MLX is optimized for Apple Silicon via command-line invocation
+1. **Task type match** (primary factor)
+2. **Provider characteristics** (e.g., creativity, reasoning depth)
+3. **Avoid-for penalties** (weakness avoidance)
+4. **Cost optimization** (if enabled)
+5. **Context window bonus** (for long contexts)
+6. **Local model bonus** (if local preference enabled)
 
 ### Async Pattern
+All provider calls are async using `asyncio` and `httpx`.
 
-All provider calls are async. The orchestrator uses:
-- `asyncio` for async operations
-- `httpx.AsyncClient` for HTTP-based providers
-- Provider SDKs' async clients where available
-- `asyncio.to_thread()` for MLX subprocess calls
+## Coding Style & Standards
 
-## Configuration
-
-- User config: `~/.ai_orchestrator/config.json`
-- Schema: `config/config-schema.json`
-- Sample: `config/config.sample.json`
-
-## Coding Style
-
-- **Python:** 3.10+ required, 4-space indentation
-- **Formatting:** Ruff (compatible with Black)
-- **Linting:** Ruff
-- **Type Checking:** MyPy (strict for `orchestrator.py`, `credentials.py`, `storage.py`)
-- **Naming:** `snake_case` for modules/functions, `CamelCase` for classes
-- **Tests:** `test_*.py` files with `Test*` classes
-
-## Testing Notes
-
-- Tests use mocking; no real API keys needed
-- `pytest-asyncio` with `asyncio_mode = "auto"` for async tests
-- Security compliance tests verify no hardcoded API keys in source
-- Local provider tests accept both "ollama" and "mlx" as valid
+- **Python:** 3.10+ required.
+- **Formatting:** Ruff (compatible with Black).
+- **Linting:** Ruff.
+- **Type Checking:** MyPy (strict for core modules: `orchestrator.py`, `credentials.py`, `storage.py`).
+- **Naming:** `snake_case` for modules/functions, `CamelCase` for classes.
+- **Tests:** `test_*.py` files with `Test*` classes.
 
 ## Commit & PR Guidelines
 
-- **Messages:** Short, imperative, present tense with component prefix
+- **Messages:** Short, imperative, present tense with component prefix.
   - Example: `orchestrator: fix model selection bug`
-- **PRs:** Mention test results, link relevant issues
-- **UI Changes:** Include screenshots or short clips
+- **PRs:** Mention test results, link relevant issues.
+- **UI Changes:** Include screenshots or short clips.
 
-## Security
+## Related Documentation
 
-- **Never commit API keys or secrets**
-- Use `python -m src.credentials` or environment variables to configure providers
-- Refer to `config/config.sample.json` for expected configuration shape
-
-## Related Files
-
-- `AGENTS.md` - General context for AI agents (OpenAI/Generic)
-- `GEMINI.md` - Context specific to Google's Gemini
-- `CLAUDE.md` - Context specific to Anthropic's Claude (this file)
+For additional context, refer to:
+- `CLAUDE.md`: Context specific to Anthropic's Claude.
+- `AGENTS.md`: General context for generic AI agents.

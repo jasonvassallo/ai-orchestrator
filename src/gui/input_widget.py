@@ -7,25 +7,22 @@ Multi-line input area with model selector and feature toggles.
 
 from __future__ import annotations
 
-from typing import Callable
-
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent
 from PySide6.QtWidgets import (
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
+    QLabel,
+    QLineEdit,
     QPushButton,
-    QSizePolicy,
+    QSlider,
     QTextEdit,
     QVBoxLayout,
     QWidget,
-    QDialog,
-    QLabel,
-    QSlider,
-    QLineEdit,
-    QGridLayout,
-    QDialogButtonBox,
 )
 
 from .styles import COLORS
@@ -77,7 +74,7 @@ class ToggleButton(QPushButton):
         if self.isChecked():
             self.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: {COLORS['toggle_on']};
+                    background-color: {COLORS["toggle_on"]};
                     color: white;
                     border-radius: 4px;
                     padding: 6px 10px;
@@ -85,21 +82,21 @@ class ToggleButton(QPushButton):
                     font-weight: 500;
                 }}
                 QPushButton:hover {{
-                    background-color: {COLORS['button_primary_hover']};
+                    background-color: {COLORS["button_primary_hover"]};
                 }}
             """)
         else:
             self.setStyleSheet(f"""
                 QPushButton {{
-                    background-color: {COLORS['toggle_off']};
-                    color: {COLORS['text_secondary']};
+                    background-color: {COLORS["toggle_off"]};
+                    color: {COLORS["text_secondary"]};
                     border-radius: 4px;
                     padding: 6px 10px;
                     font-size: 12px;
                 }}
                 QPushButton:hover {{
-                    background-color: {COLORS['bg_hover']};
-                    color: {COLORS['text_primary']};
+                    background-color: {COLORS["bg_hover"]};
+                    color: {COLORS["text_primary"]};
                 }}
             """)
 
@@ -131,23 +128,50 @@ class MusicGenerationDialog(QDialog):
         # Key signature
         grid.addWidget(QLabel("Key:"), 1, 0)
         self.key_combo = QComboBox()
-        self.key_combo.addItems([
-            "C Major", "C Minor", "D Major", "D Minor",
-            "E Major", "E Minor", "F Major", "F Minor",
-            "G Major", "G Minor", "A Major", "A Minor",
-            "B Major", "B Minor", "Auto"
-        ])
+        self.key_combo.addItems(
+            [
+                "C Major",
+                "C Minor",
+                "D Major",
+                "D Minor",
+                "E Major",
+                "E Minor",
+                "F Major",
+                "F Minor",
+                "G Major",
+                "G Minor",
+                "A Major",
+                "A Minor",
+                "B Major",
+                "B Minor",
+                "Auto",
+            ]
+        )
         self.key_combo.setCurrentText("Auto")
         grid.addWidget(self.key_combo, 1, 1)
 
         # Genre
         grid.addWidget(QLabel("Genre:"), 2, 0)
         self.genre_combo = QComboBox()
-        self.genre_combo.addItems([
-            "Auto", "Classical", "Electronic", "Jazz", "Rock",
-            "Pop", "Hip Hop", "Ambient", "Orchestral", "Folk",
-            "Blues", "Country", "R&B", "Metal", "Indie"
-        ])
+        self.genre_combo.addItems(
+            [
+                "Auto",
+                "Classical",
+                "Electronic",
+                "Jazz",
+                "Rock",
+                "Pop",
+                "Hip Hop",
+                "Ambient",
+                "Orchestral",
+                "Folk",
+                "Blues",
+                "Country",
+                "R&B",
+                "Metal",
+                "Indie",
+            ]
+        )
         grid.addWidget(self.genre_combo, 2, 1)
 
         # Sounds like artist
@@ -159,11 +183,23 @@ class MusicGenerationDialog(QDialog):
         # Mood
         grid.addWidget(QLabel("Mood:"), 4, 0)
         self.mood_combo = QComboBox()
-        self.mood_combo.addItems([
-            "Auto", "Happy", "Sad", "Energetic", "Calm",
-            "Dark", "Uplifting", "Mysterious", "Romantic",
-            "Aggressive", "Peaceful", "Epic", "Nostalgic"
-        ])
+        self.mood_combo.addItems(
+            [
+                "Auto",
+                "Happy",
+                "Sad",
+                "Energetic",
+                "Calm",
+                "Dark",
+                "Uplifting",
+                "Mysterious",
+                "Romantic",
+                "Aggressive",
+                "Peaceful",
+                "Epic",
+                "Nostalgic",
+            ]
+        )
         grid.addWidget(self.mood_combo, 4, 1)
 
         # Energy slider
@@ -189,10 +225,16 @@ class MusicGenerationDialog(QDialog):
         # Duration
         grid.addWidget(QLabel("Duration:"), 7, 0)
         self.duration_combo = QComboBox()
-        self.duration_combo.addItems([
-            "10 seconds", "15 seconds", "30 seconds",
-            "60 seconds", "90 seconds", "120 seconds"
-        ])
+        self.duration_combo.addItems(
+            [
+                "10 seconds",
+                "15 seconds",
+                "30 seconds",
+                "60 seconds",
+                "90 seconds",
+                "120 seconds",
+            ]
+        )
         self.duration_combo.setCurrentText("30 seconds")
         grid.addWidget(self.duration_combo, 7, 1)
 
@@ -225,10 +267,16 @@ class MusicGenerationDialog(QDialog):
 
         return {
             "prompt": self.prompt_edit.text(),
-            "key": self.key_combo.currentText() if self.key_combo.currentText() != "Auto" else None,
-            "genre": self.genre_combo.currentText() if self.genre_combo.currentText() != "Auto" else None,
+            "key": self.key_combo.currentText()
+            if self.key_combo.currentText() != "Auto"
+            else None,
+            "genre": self.genre_combo.currentText()
+            if self.genre_combo.currentText() != "Auto"
+            else None,
             "artist": self.artist_edit.text().strip() or None,
-            "mood": self.mood_combo.currentText() if self.mood_combo.currentText() != "Auto" else None,
+            "mood": self.mood_combo.currentText()
+            if self.mood_combo.currentText() != "Auto"
+            else None,
             "energy": self.energy_slider.value() / 100.0,
             "bpm": bpm,
             "duration": duration,
@@ -276,7 +324,9 @@ class InputWidget(QFrame):
 
         # Model selector
         model_label = QLabel("Model:")
-        model_label.setStyleSheet(f"color: {COLORS['text_secondary']}; font-size: 12px;")
+        model_label.setStyleSheet(
+            f"color: {COLORS['text_secondary']}; font-size: 12px;"
+        )
         top_row.addWidget(model_label)
 
         self.model_combo = QComboBox()
@@ -320,7 +370,7 @@ class InputWidget(QFrame):
         self.send_button.clicked.connect(self._send_message)
         self.send_button.setStyleSheet(f"""
             QPushButton {{
-                background-color: {COLORS['button_primary']};
+                background-color: {COLORS["button_primary"]};
                 color: white;
                 border: none;
                 border-radius: 8px;
@@ -328,11 +378,11 @@ class InputWidget(QFrame):
                 font-size: 14px;
             }}
             QPushButton:hover {{
-                background-color: {COLORS['button_primary_hover']};
+                background-color: {COLORS["button_primary_hover"]};
             }}
             QPushButton:disabled {{
-                background-color: {COLORS['bg_tertiary']};
-                color: {COLORS['text_muted']};
+                background-color: {COLORS["bg_tertiary"]};
+                color: {COLORS["text_muted"]};
             }}
         """)
         bottom_row.addWidget(self.send_button)
@@ -342,8 +392,8 @@ class InputWidget(QFrame):
         # Styling
         self.setStyleSheet(f"""
             QFrame#inputContainer {{
-                background-color: {COLORS['bg_secondary']};
-                border-top: 1px solid {COLORS['border']};
+                background-color: {COLORS["bg_secondary"]};
+                border-top: 1px solid {COLORS["border"]};
             }}
         """)
 
@@ -375,7 +425,9 @@ class InputWidget(QFrame):
             "web_search": self.web_toggle.isChecked(),
             "deep_research": self.research_toggle.isChecked(),
             "image_generation": self.image_toggle.isChecked(),
-            "music_generation": self._music_params if self.music_toggle.isChecked() else None,
+            "music_generation": self._music_params
+            if self.music_toggle.isChecked()
+            else None,
         }
 
         self.text_input.clear()

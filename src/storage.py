@@ -244,7 +244,7 @@ class ConversationStorage:
 
         with self._get_connection() as conn:
             cursor = conn.execute(
-                f"UPDATE conversations SET {', '.join(updates)} WHERE id = ?",
+                f"UPDATE conversations SET {', '.join(updates)} WHERE id = ?",  # noqa: S608
                 params,
             )
             conn.commit()
@@ -331,7 +331,7 @@ class ConversationStorage:
 
         with self._get_connection() as conn:
             cursor = conn.execute(
-                f"UPDATE messages SET {', '.join(updates)} WHERE id = ?",
+                f"UPDATE messages SET {', '.join(updates)} WHERE id = ?",  # noqa: S608
                 params,
             )
             conn.commit()

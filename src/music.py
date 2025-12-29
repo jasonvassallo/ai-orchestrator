@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import os
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -21,6 +21,7 @@ from typing import Any
 # MIDI creation
 try:
     from midiutil import MIDIFile
+
     MIDI_AVAILABLE = True
 except ImportError:
     MIDI_AVAILABLE = False
@@ -29,107 +30,146 @@ except ImportError:
 MUSICGEN_AVAILABLE = False
 MUSICGEN_MODEL = None
 try:
-    import torch
+    import torch  # noqa: F401
+
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
 
 
 # Music theory constants
-NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 
 SCALES = {
-    'major': [0, 2, 4, 5, 7, 9, 11],
-    'minor': [0, 2, 3, 5, 7, 8, 10],
-    'dorian': [0, 2, 3, 5, 7, 9, 10],  # Great for house music
-    'mixolydian': [0, 2, 4, 5, 7, 9, 10],
-    'pentatonic_major': [0, 2, 4, 7, 9],
-    'pentatonic_minor': [0, 3, 5, 7, 10],
-    'blues': [0, 3, 5, 6, 7, 10],
+    "major": [0, 2, 4, 5, 7, 9, 11],
+    "minor": [0, 2, 3, 5, 7, 8, 10],
+    "dorian": [0, 2, 3, 5, 7, 9, 10],  # Great for house music
+    "mixolydian": [0, 2, 4, 5, 7, 9, 10],
+    "pentatonic_major": [0, 2, 4, 7, 9],
+    "pentatonic_minor": [0, 3, 5, 7, 10],
+    "blues": [0, 3, 5, 6, 7, 10],
 }
 
 # 90s Tech House chord progressions (minor key focused)
 CHORD_PATTERNS = {
-    'tech_house_90s': [
+    "tech_house_90s": [
         # Classic minor progression with tension
-        (0, 4), (5, 4), (3, 4), (4, 4),  # i - VI - iv - V
+        (0, 4),
+        (5, 4),
+        (3, 4),
+        (4, 4),  # i - VI - iv - V
     ],
-    'progressive_house': [
-        (0, 8), (5, 4), (3, 4), (4, 8), (0, 8),  # Long builds
+    "progressive_house": [
+        (0, 8),
+        (5, 4),
+        (3, 4),
+        (4, 8),
+        (0, 8),  # Long builds
     ],
-    'funky_house': [
-        (0, 2), (0, 2), (3, 2), (3, 2), (5, 2), (5, 2), (4, 2), (4, 2),
+    "funky_house": [
+        (0, 2),
+        (0, 2),
+        (3, 2),
+        (3, 2),
+        (5, 2),
+        (5, 2),
+        (4, 2),
+        (4, 2),
     ],
-    'deep_house': [
-        (0, 4), (3, 4), (5, 4), (4, 4),
+    "deep_house": [
+        (0, 4),
+        (3, 4),
+        (5, 4),
+        (4, 4),
     ],
-    'minimal_tech': [
-        (0, 8), (0, 8), (3, 8), (0, 8),
+    "minimal_tech": [
+        (0, 8),
+        (0, 8),
+        (3, 8),
+        (0, 8),
     ],
 }
 
 # 90s Tech House drum patterns (16 steps = 1 bar at 4/4)
 DRUM_PATTERNS = {
-    'tech_house_90s': {
+    "tech_house_90s": {
         # Classic 4-on-the-floor with syncopated kicks
-        'kick': [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0],
-        'snare': [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-        'clap': [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-        'hihat': [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        'open_hat': [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],  # Offbeat open hats
-        'rimshot': [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
+        "kick": [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 0],
+        "snare": [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        "clap": [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        "hihat": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+        "open_hat": [
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0,
+            1,
+        ],  # Offbeat open hats
+        "rimshot": [0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0],
     },
-    'funky_90s': {
+    "funky_90s": {
         # Funky syncopated pattern
-        'kick': [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0],
-        'snare': [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
-        'clap': [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],
-        'hihat': [1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0],
-        'open_hat': [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
-        'shaker': [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-        'conga': [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1],
+        "kick": [1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0],
+        "snare": [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0],
+        "clap": [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],
+        "hihat": [1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0],
+        "open_hat": [0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1],
+        "shaker": [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        "conga": [0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0, 1],
     },
-    'progressive_house': {
-        'kick': [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
-        'clap': [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-        'hihat': [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-        'open_hat': [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0],
-        'ride': [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+    "progressive_house": {
+        "kick": [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+        "clap": [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        "hihat": [1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+        "open_hat": [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+        "ride": [0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
     },
-    'minimal': {
-        'kick': [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
-        'rimshot': [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
-        'hihat': [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
+    "minimal": {
+        "kick": [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+        "rimshot": [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        "hihat": [0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0],
     },
 }
 
 # General MIDI drum map (channel 10)
 DRUM_NOTES = {
-    'kick': 36,
-    'kick2': 35,
-    'snare': 38,
-    'snare2': 40,
-    'rimshot': 37,
-    'clap': 39,
-    'hihat': 42,
-    'hihat_pedal': 44,
-    'open_hat': 46,
-    'shaker': 70,
-    'tambourine': 54,
-    'conga': 63,
-    'conga_high': 62,
-    'tom_low': 45,
-    'tom_mid': 47,
-    'tom_high': 50,
-    'crash': 49,
-    'ride': 51,
-    'ride_bell': 53,
+    "kick": 36,
+    "kick2": 35,
+    "snare": 38,
+    "snare2": 40,
+    "rimshot": 37,
+    "clap": 39,
+    "hihat": 42,
+    "hihat_pedal": 44,
+    "open_hat": 46,
+    "shaker": 70,
+    "tambourine": 54,
+    "conga": 63,
+    "conga_high": 62,
+    "tom_low": 45,
+    "tom_mid": 47,
+    "tom_high": 50,
+    "crash": 49,
+    "ride": 51,
+    "ride_bell": 53,
 }
 
 
 @dataclass
 class MusicParameters:
     """Parameters for music generation."""
+
     prompt: str = ""
     key: str = "G"  # G minor is classic for tech house
     scale: str = "minor"
@@ -177,7 +217,7 @@ class MusicParameters:
         # Get BPM, default to 124-128 range for tech house
         bpm = data.get("bpm")
         if not bpm:
-            bpm = random.randint(124, 128)
+            bpm = random.randint(124, 128)  # noqa: S311
 
         return cls(
             prompt=data.get("prompt", ""),
@@ -203,7 +243,7 @@ def get_output_dir() -> Path:
 def get_scale_notes(root: str, scale: str, octave: int = 4) -> list[int]:
     """Get MIDI note numbers for a scale starting at the given root."""
     root_idx = NOTES.index(root) if root in NOTES else 0
-    intervals = SCALES.get(scale, SCALES['minor'])
+    intervals = SCALES.get(scale, SCALES["minor"])
     base_note = (octave + 1) * 12 + root_idx  # MIDI note number
     return [base_note + i for i in intervals]
 
@@ -223,7 +263,7 @@ def create_drums_midi(params: MusicParameters, filename_base: str) -> str:
     measures = max(4, min(measures, 64))
 
     # Get drum pattern
-    pattern_name = params.genre if params.genre in DRUM_PATTERNS else 'tech_house_90s'
+    pattern_name = params.genre if params.genre in DRUM_PATTERNS else "tech_house_90s"
     drum_pattern = DRUM_PATTERNS[pattern_name]
     steps_per_beat = 4
     total_steps = measures * beats_per_measure * steps_per_beat
@@ -237,9 +277,9 @@ def create_drums_midi(params: MusicParameters, filename_base: str) -> str:
                 time = step / steps_per_beat
                 # Humanize velocity
                 base_velocity = 80 + int(params.energy * 40)
-                velocity = min(127, base_velocity + random.randint(-10, 10))
+                velocity = min(127, base_velocity + random.randint(-10, 10))  # noqa: S311
                 # Slight timing humanization
-                time_offset = random.uniform(-0.01, 0.01)
+                time_offset = random.uniform(-0.01, 0.01)  # noqa: S311
                 midi.addNote(0, 9, note, max(0, time + time_offset), 0.2, velocity)
 
     output_path = get_output_dir() / f"{filename_base}_drums.mid"
@@ -268,7 +308,7 @@ def create_bass_midi(params: MusicParameters, filename_base: str) -> str:
     scale_notes = get_scale_notes(params.key, params.scale, octave=2)
 
     # Get chord pattern
-    pattern_name = params.genre if params.genre in CHORD_PATTERNS else 'tech_house_90s'
+    pattern_name = params.genre if params.genre in CHORD_PATTERNS else "tech_house_90s"
     chord_pattern = CHORD_PATTERNS[pattern_name]
 
     current_beat = 0
@@ -279,15 +319,20 @@ def create_bass_midi(params: MusicParameters, filename_base: str) -> str:
         bass_note = scale_notes[chord_root_offset % len(scale_notes)]
 
         # 90s tech house bass pattern: hits on beat with occasional syncopation
-        for beat_offset in range(min(duration, measures * beats_per_measure - current_beat)):
+        for beat_offset in range(
+            min(duration, measures * beats_per_measure - current_beat)
+        ):
             beat = current_beat + beat_offset
 
             # Main bass hit on the beat
-            velocity = min(127, 90 + int(params.energy * 30) + random.randint(-5, 5))
+            velocity = min(127, 90 + int(params.energy * 30) + random.randint(-5, 5))  # noqa: S311
             midi.addNote(0, 0, bass_note, beat, 0.4, velocity)
 
             # Occasional offbeat ghost note (funky element)
-            if random.random() < 0.3 and params.genre in ['funky_90s', 'tech_house_90s']:
+            if random.random() < 0.3 and params.genre in [  # noqa: S311
+                "funky_90s",
+                "tech_house_90s",
+            ]:
                 ghost_velocity = velocity - 30
                 midi.addNote(0, 0, bass_note, beat + 0.5, 0.2, ghost_velocity)
 
@@ -320,7 +365,7 @@ def create_chords_midi(params: MusicParameters, filename_base: str) -> str:
     scale_notes = get_scale_notes(params.key, params.scale, octave=4)
 
     # Get chord pattern
-    pattern_name = params.genre if params.genre in CHORD_PATTERNS else 'tech_house_90s'
+    pattern_name = params.genre if params.genre in CHORD_PATTERNS else "tech_house_90s"
     chord_pattern = CHORD_PATTERNS[pattern_name]
 
     current_beat = 0
@@ -389,7 +434,7 @@ def create_combined_midi(params: MusicParameters, filename_base: str) -> str:
     measures = max(4, min(measures, 64))
 
     # --- Drums (Track 0, Channel 9) ---
-    pattern_name = params.genre if params.genre in DRUM_PATTERNS else 'tech_house_90s'
+    pattern_name = params.genre if params.genre in DRUM_PATTERNS else "tech_house_90s"
     drum_pattern = DRUM_PATTERNS[pattern_name]
     steps_per_beat = 4
     total_steps = measures * beats_per_measure * steps_per_beat
@@ -401,12 +446,16 @@ def create_combined_midi(params: MusicParameters, filename_base: str) -> str:
         for step in range(total_steps):
             if pattern[step % pattern_len]:
                 time = step / steps_per_beat
-                velocity = min(127, 80 + int(params.energy * 40) + random.randint(-8, 8))
+                velocity = min(
+                    127, 80 + int(params.energy * 40) + random.randint(-8, 8)  # noqa: S311
+                )
                 midi.addNote(0, 9, note, time, 0.2, velocity)
 
     # --- Bass (Track 1, Channel 0) ---
     scale_notes_bass = get_scale_notes(params.key, params.scale, octave=2)
-    chord_pattern_name = params.genre if params.genre in CHORD_PATTERNS else 'tech_house_90s'
+    chord_pattern_name = (
+        params.genre if params.genre in CHORD_PATTERNS else "tech_house_90s"
+    )
     chord_pattern = CHORD_PATTERNS[chord_pattern_name]
 
     current_beat = 0
@@ -416,7 +465,9 @@ def create_combined_midi(params: MusicParameters, filename_base: str) -> str:
         chord_root_offset, duration = chord_pattern[pattern_idx % len(chord_pattern)]
         bass_note = scale_notes_bass[chord_root_offset % len(scale_notes_bass)]
 
-        for beat_offset in range(min(duration, measures * beats_per_measure - current_beat)):
+        for beat_offset in range(
+            min(duration, measures * beats_per_measure - current_beat)
+        ):
             beat = current_beat + beat_offset
             velocity = min(127, 90 + int(params.energy * 30))
             midi.addNote(1, 0, bass_note, beat, 0.4, velocity)
@@ -458,12 +509,13 @@ def create_combined_midi(params: MusicParameters, filename_base: str) -> str:
     return str(output_path)
 
 
-async def generate_audio_with_musicgen(params: MusicParameters, filename_base: str) -> str | None:
+async def generate_audio_with_musicgen(
+    params: MusicParameters, filename_base: str
+) -> str | None:
     """Generate audio using MusicGen (requires torch + transformers)."""
     try:
-        from transformers import AutoProcessor, MusicgenForConditionalGeneration
         import scipy.io.wavfile as wav
-        import numpy as np
+        from transformers import AutoProcessor, MusicgenForConditionalGeneration
     except ImportError:
         return None
 
@@ -476,11 +528,11 @@ async def generate_audio_with_musicgen(params: MusicParameters, filename_base: s
     prompt_parts.append(f"{params.key} {params.scale}")
 
     genre_descriptions = {
-        'tech_house_90s': "90s tech house, funky beats, underground electronic",
-        'funky_90s': "funky house, groovy bassline, 90s electronic",
-        'progressive_house': "progressive house, atmospheric, building",
-        'deep_house': "deep house, soulful, smooth",
-        'minimal': "minimal techno, hypnotic, stripped back",
+        "tech_house_90s": "90s tech house, funky beats, underground electronic",
+        "funky_90s": "funky house, groovy bassline, 90s electronic",
+        "progressive_house": "progressive house, atmospheric, building",
+        "deep_house": "deep house, soulful, smooth",
+        "minimal": "minimal techno, hypnotic, stripped back",
     }
     prompt_parts.append(genre_descriptions.get(params.genre, "electronic dance music"))
 
@@ -489,7 +541,9 @@ async def generate_audio_with_musicgen(params: MusicParameters, filename_base: s
     try:
         # Load model (this is slow first time)
         processor = AutoProcessor.from_pretrained("facebook/musicgen-small")
-        model = MusicgenForConditionalGeneration.from_pretrained("facebook/musicgen-small")
+        model = MusicgenForConditionalGeneration.from_pretrained(
+            "facebook/musicgen-small"
+        )
 
         inputs = processor(
             text=[prompt],
@@ -531,76 +585,98 @@ async def generate_music(params: MusicParameters) -> dict[str, Any]:
             "bpm": params.bpm,
             "duration": params.duration,
             "genre": params.genre,
-        }
+        },
     }
 
     # Generate filename base
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_prompt = "".join(c for c in params.prompt[:20] if c.isalnum() or c == " ").strip()
+    safe_prompt = "".join(
+        c for c in params.prompt[:20] if c.isalnum() or c == " "
+    ).strip()
     safe_prompt = safe_prompt.replace(" ", "_") or "track"
-    filename_base = f"{safe_prompt}_{params.key}{params.scale[0]}_{params.bpm}bpm_{timestamp}"
+    filename_base = (
+        f"{safe_prompt}_{params.key}{params.scale[0]}_{params.bpm}bpm_{timestamp}"
+    )
 
     try:
         if not MIDI_AVAILABLE:
             results["success"] = False
-            results["message"] = "MIDI generation requires midiutil. Install with: pip install midiutil"
+            results["message"] = (
+                "MIDI generation requires midiutil. Install with: pip install midiutil"
+            )
             return results
 
         # Generate separate MIDI files
         if params.separate_tracks:
             # Drums
             drums_path = create_drums_midi(params, filename_base)
-            results["files"].append({
-                "type": "midi",
-                "track": "drums",
-                "path": drums_path,
-                "filename": os.path.basename(drums_path),
-            })
+            results["files"].append(
+                {
+                    "type": "midi",
+                    "track": "drums",
+                    "path": drums_path,
+                    "filename": os.path.basename(drums_path),
+                }
+            )
 
             # Bass
             bass_path = create_bass_midi(params, filename_base)
-            results["files"].append({
-                "type": "midi",
-                "track": "bass",
-                "path": bass_path,
-                "filename": os.path.basename(bass_path),
-            })
+            results["files"].append(
+                {
+                    "type": "midi",
+                    "track": "bass",
+                    "path": bass_path,
+                    "filename": os.path.basename(bass_path),
+                }
+            )
 
             # Chords
             chords_path = create_chords_midi(params, filename_base)
-            results["files"].append({
-                "type": "midi",
-                "track": "chords",
-                "path": chords_path,
-                "filename": os.path.basename(chords_path),
-            })
+            results["files"].append(
+                {
+                    "type": "midi",
+                    "track": "chords",
+                    "path": chords_path,
+                    "filename": os.path.basename(chords_path),
+                }
+            )
 
         # Always create combined file too
         combined_path = create_combined_midi(params, filename_base)
-        results["files"].append({
-            "type": "midi",
-            "track": "full",
-            "path": combined_path,
-            "filename": os.path.basename(combined_path),
-        })
+        results["files"].append(
+            {
+                "type": "midi",
+                "track": "full",
+                "path": combined_path,
+                "filename": os.path.basename(combined_path),
+            }
+        )
 
         # Try to generate audio with MusicGen
         if params.output_format in ("wav", "mp3", "all"):
             if TORCH_AVAILABLE:
                 audio_path = await generate_audio_with_musicgen(params, filename_base)
                 if audio_path:
-                    results["files"].append({
-                        "type": "wav",
-                        "track": "audio",
-                        "path": audio_path,
-                        "filename": os.path.basename(audio_path),
-                    })
+                    results["files"].append(
+                        {
+                            "type": "wav",
+                            "track": "audio",
+                            "path": audio_path,
+                            "filename": os.path.basename(audio_path),
+                        }
+                    )
                 else:
-                    results["message"] += "\nAudio generation requires: pip install transformers torch scipy"
+                    results["message"] += (
+                        "\nAudio generation requires: pip install transformers torch scipy"
+                    )
             else:
-                results["message"] += "\nFor AI audio generation, install: pip install torch transformers scipy"
+                results["message"] += (
+                    "\nFor AI audio generation, install: pip install torch transformers scipy"
+                )
 
-        results["message"] = f"Generated {len(results['files'])} file(s) in ~/Music/AI Orchestrator/"
+        results["message"] = (
+            f"Generated {len(results['files'])} file(s) in ~/Music/AI Orchestrator/"
+        )
 
     except Exception as e:
         results["success"] = False
@@ -615,9 +691,13 @@ def format_music_result(result: dict) -> str:
 
     if result["success"]:
         lines.append("**Music Generated Successfully!**\n")
-        lines.append(f"**Key:** {result['params']['key']} {result['params']['scale'].title()}")
+        lines.append(
+            f"**Key:** {result['params']['key']} {result['params']['scale'].title()}"
+        )
         lines.append(f"**BPM:** {result['params']['bpm']}")
-        lines.append(f"**Style:** {result['params']['genre'].replace('_', ' ').title()}")
+        lines.append(
+            f"**Style:** {result['params']['genre'].replace('_', ' ').title()}"
+        )
         lines.append("")
 
         if result["files"]:

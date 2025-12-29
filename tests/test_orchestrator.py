@@ -15,7 +15,7 @@ from unittest.mock import patch
 import pytest
 
 # Add src to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from src.credentials import (
     EnvironmentBackend,
@@ -108,7 +108,10 @@ class TestTaskClassifier:
         for prompt in prompts:
             tasks = TaskClassifier.classify(prompt)
             task_types = [t[0] for t in tasks]
-            assert TaskType.DEEP_REASONING in task_types or TaskType.REASONING in task_types, f"Failed for: {prompt}"
+            assert (
+                TaskType.DEEP_REASONING in task_types
+                or TaskType.REASONING in task_types
+            ), f"Failed for: {prompt}"
 
     def test_creative_task_detection(self):
         """Creative prompts should be classified correctly"""
@@ -150,6 +153,19 @@ class TestModelRegistry:
         model = ModelRegistry.get_model("nonexistent-model")
         assert model is None
 
+    def test_get_model_by_provider_model_id(self):
+        """Should resolve a registry entry from a provider model id"""
+        model = ModelRegistry.get_model("gemini-3-flash-preview")
+        assert model is not None
+        assert model.provider == "google"
+        assert model.model_id == "gemini-3-flash-preview"
+
+    def test_model_id_resolution_prefers_google_over_vertex(self):
+        """If multiple models share an id, prefer the non-Vertex entry"""
+        model = ModelRegistry.get_model("gemini-3-pro-preview")
+        assert model is not None
+        assert model.provider == "google"
+
     def test_get_models_for_task(self):
         """Should return suitable models for task type"""
         models = ModelRegistry.get_models_for_task(TaskType.CODE_GENERATION)
@@ -161,8 +177,7 @@ class TestModelRegistry:
         """Should filter for local models when requested"""
         local_providers = {"ollama", "mlx"}  # Both are valid local providers
         models = ModelRegistry.get_models_for_task(
-            TaskType.GENERAL_NLP,
-            require_local=True
+            TaskType.GENERAL_NLP, require_local=True
         )
         for model in models:
             assert model.provider in local_providers
@@ -309,10 +324,7 @@ class TestAIOrchestrator:
     @pytest.mark.asyncio
     async def test_query_with_invalid_model_override(self, orchestrator):
         """Should fail gracefully with invalid model"""
-        response = await orchestrator.query(
-            "Hello",
-            model_override="nonexistent-model"
-        )
+        response = await orchestrator.query("Hello", model_override="nonexistent-model")
         assert response.success is False
         assert "unknown model" in response.error.lower()
 
@@ -370,22 +382,24 @@ class TestSecurityCompliance:
 
         # Patterns that might indicate hardcoded API keys
         patterns = [
-            r'sk-[a-zA-Z0-9]{20,}',  # OpenAI
-            r'sk-ant-[a-zA-Z0-9]{20,}',  # Anthropic
-            r'AIza[a-zA-Z0-9]{35}',  # Google
+            r"sk-[a-zA-Z0-9]{20,}",  # OpenAI
+            r"sk-ant-[a-zA-Z0-9]{20,}",  # Anthropic
+            r"AIza[a-zA-Z0-9]{35}",  # Google
         ]
 
-        src_dir = os.path.join(os.path.dirname(__file__), '..', 'src')
+        src_dir = os.path.join(os.path.dirname(__file__), "..", "src")
 
         for root, _dirs, files in os.walk(src_dir):
             for file in files:
-                if file.endswith('.py'):
+                if file.endswith(".py"):
                     filepath = os.path.join(root, file)
                     with open(filepath) as f:
                         content = f.read()
                         for pattern in patterns:
                             matches = re.findall(pattern, content)
-                            assert len(matches) == 0, f"Potential API key found in {filepath}"
+                            assert len(matches) == 0, (
+                                f"Potential API key found in {filepath}"
+                            )
 
     def test_logs_redact_sensitive_data(self):
         """Verify sensitive data is redacted in logging"""

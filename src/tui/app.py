@@ -14,33 +14,24 @@ Or after installation:
 
 from __future__ import annotations
 
-import asyncio
 import sys
-from datetime import datetime
-from typing import TYPE_CHECKING
 
 try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
-    from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
+    from textual.containers import Horizontal, ScrollableContainer
+    from textual.screen import Screen
     from textual.widgets import (
         Button,
         Footer,
         Header,
         Input,
         Label,
-        ListItem,
-        ListView,
         Markdown,
         Select,
         Static,
         Switch,
     )
-    from textual.screen import Screen
-    from textual import events
-    from rich.markdown import Markdown as RichMarkdown
-    from rich.syntax import Syntax
-    from rich.panel import Panel
 except ImportError:
     print("Error: textual and rich are required for the TUI.")
     print("Install them with: pip install textual rich")
@@ -169,7 +160,7 @@ class ChatScreen(Screen):
                 "  • [bold]Enter[/] - Send message\n"
                 "  • [bold]Ctrl+N[/] - New chat\n"
                 "  • [bold]Ctrl+Q[/] - Quit\n",
-                id="welcome"
+                id="welcome",
             )
 
         # Controls
@@ -247,8 +238,7 @@ class ChatScreen(Screen):
         # Add user message
         container = self.query_one("#chat-container", ScrollableContainer)
         user_msg = Static(
-            f"[bold cyan]You[/]\n\n{message}",
-            classes="message user-message"
+            f"[bold cyan]You[/]\n\n{message}", classes="message user-message"
         )
         await container.mount(user_msg)
         container.scroll_end()
@@ -302,7 +292,7 @@ class ChatScreen(Screen):
             # Add assistant message
             assistant_msg = Static(
                 f"[bold green]Assistant[/] {model_used}\n\n{response_text}",
-                classes="message assistant-message"
+                classes="message assistant-message",
             )
             await container.mount(assistant_msg)
             container.scroll_end()
@@ -313,8 +303,7 @@ class ChatScreen(Screen):
         except Exception as e:
             loading.remove()
             error_msg = Static(
-                f"[bold red]Error[/]\n\n{str(e)}",
-                classes="message assistant-message"
+                f"[bold red]Error[/]\n\n{str(e)}", classes="message assistant-message"
             )
             await container.mount(error_msg)
             container.scroll_end()
@@ -342,6 +331,7 @@ class AIChat(App):
         """Initialize on mount."""
         try:
             from ..orchestrator import AIOrchestrator
+
             self.orchestrator = AIOrchestrator(verbose=False)
         except Exception as e:
             self.notify(f"Could not initialize orchestrator: {e}", severity="warning")

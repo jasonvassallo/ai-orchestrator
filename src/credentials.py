@@ -19,13 +19,14 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 # Cryptography imports with fallback
 try:
     from cryptography.fernet import Fernet
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
     CRYPTO_AVAILABLE = True
 except ImportError:
     CRYPTO_AVAILABLE = False
@@ -33,6 +34,7 @@ except ImportError:
 # Keyring import with fallback
 try:
     import keyring
+
     KEYRING_AVAILABLE = True
 except ImportError:
     KEYRING_AVAILABLE = False
@@ -48,6 +50,7 @@ ENCRYPTED_CREDS_FILE = CONFIG_DIR / "credentials.enc"
 @dataclass(frozen=True)
 class APICredential:
     """Immutable credential container with secure string handling"""
+
     provider: str
     _key: str  # Private - never exposed directly
 
@@ -162,9 +165,12 @@ class EncryptedFileBackend(CredentialBackend):
         if sys.platform == "darwin":
             try:
                 import subprocess
+
                 result = subprocess.run(
                     ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
-                    capture_output=True, text=True, check=False
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
                 for line in result.stdout.split("\n"):
                     if "IOPlatformUUID" in line:
@@ -182,10 +188,12 @@ class EncryptedFileBackend(CredentialBackend):
                 logger.debug(f"Could not read Linux machine-id: {e}")
 
         # Add username and hostname as fallback
-        identifiers.extend([
-            getpass.getuser(),
-            os.uname().nodename if hasattr(os, 'uname') else "unknown"
-        ])
+        identifiers.extend(
+            [
+                getpass.getuser(),
+                os.uname().nodename if hasattr(os, "uname") else "unknown",
+            ]
+        )
 
         combined = ":".join(identifiers)
         return hashlib.sha256(combined.encode()).digest()
@@ -282,7 +290,11 @@ class EnvironmentBackend(CredentialBackend):
     ENV_VAR_MAP = {
         "openai": "OPENAI_API_KEY",
         "anthropic": "ANTHROPIC_API_KEY",
-        "google": "GOOGLE_API_KEY",
+        # Google Gemini Developer API key (AI Studio)
+        # NOTE: We intentionally do NOT use GOOGLE_API_KEY here because it is
+        # commonly used for Vertex AI "express" mode and can cause auth issues
+        # when OAuth/ADC is required.
+        "google": "GEMINI_API_KEY",
         "cohere": "COHERE_API_KEY",
         "mistral": "MISTRAL_API_KEY",
         "xai": "XAI_API_KEY",
@@ -297,10 +309,7 @@ class EnvironmentBackend(CredentialBackend):
         return True
 
     def _get_env_var(self, provider: str) -> str:
-        return self.ENV_VAR_MAP.get(
-            provider.lower(),
-            f"{provider.upper()}_API_KEY"
-        )
+        return self.ENV_VAR_MAP.get(provider.lower(), f"{provider.upper()}_API_KEY")
 
     def get(self, provider: str) -> str | None:
         return os.environ.get(self._get_env_var(provider))
@@ -308,9 +317,7 @@ class EnvironmentBackend(CredentialBackend):
     def set(self, provider: str, api_key: str) -> bool:
         # Can't persistently set environment variables
         os.environ[self._get_env_var(provider)] = api_key
-        logger.warning(
-            f"Set API key in environment (non-persistent) for: {provider}"
-        )
+        logger.warning(f"Set API key in environment (non-persistent) for: {provider}")
         return True
 
     def delete(self, provider: str) -> bool:
@@ -342,13 +349,13 @@ class CredentialManager:
 
     def _validate_security(self) -> None:
         """Log security posture on initialization"""
-        available = [
-            type(b).__name__ for b in self._backends if b.is_available
-        ]
+        available = [type(b).__name__ for b in self._backends if b.is_available]
         logger.info(f"Available credential backends: {available}")
 
-        if not any(isinstance(b, (KeyringBackend, EncryptedFileBackend))
-                   and b.is_available for b in self._backends):
+        if not any(
+            isinstance(b, (KeyringBackend, EncryptedFileBackend)) and b.is_available
+            for b in self._backends
+        ):
             logger.warning(
                 "⚠️  No secure credential storage available. "
                 "Install 'keyring' or 'cryptography' for secure storage."
@@ -375,8 +382,7 @@ class CredentialManager:
                 credential = APICredential(provider=provider, _key=api_key)
                 self._cache[provider] = credential
                 logger.debug(
-                    f"Retrieved credential for {provider} from "
-                    f"{type(backend).__name__}"
+                    f"Retrieved credential for {provider} from {type(backend).__name__}"
                 )
                 return credential
 
@@ -484,10 +490,10 @@ def configure_credentials_interactive() -> None:
 
         response = input(f"Configure {provider_id}? (y/N/clear): ").strip().lower()
 
-        if response == 'clear':
+        if response == "clear":
             manager.delete_credential(provider_id)
             print(f"  → Cleared {provider_id} credentials")
-        elif response == 'y':
+        elif response == "y":
             api_key = getpass.getpass(f"  Enter API key for {provider_id}: ")
             if api_key:
                 if manager.set_credential(provider_id, api_key):

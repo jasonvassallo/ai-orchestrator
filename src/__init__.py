@@ -41,14 +41,12 @@ from typing import Any
 __all__ = [
     # Version
     "__version__",
-
     # Credential management
     "get_api_key",
     "set_api_key",
     "get_credential_manager",
     "CredentialManager",
     "configure_credentials_interactive",
-
     # Orchestrator
     "AIOrchestrator",
     "TaskType",

@@ -55,12 +55,19 @@ python -m src.credentials
 # Or set environment variables
 export OPENAI_API_KEY="sk-..."
 export ANTHROPIC_API_KEY="sk-ant-..."
-export GOOGLE_API_KEY="..."
+export GEMINI_API_KEY="..."
 export MISTRAL_API_KEY="..."
 export GROQ_API_KEY="..."
 export XAI_API_KEY="..."
 export PERPLEXITY_API_KEY="..."
 export DEEPSEEK_API_KEY="..."
+```
+
+Vertex AI models use Application Default Credentials (ADC) instead of an API key:
+```bash
+gcloud auth application-default login
+export GOOGLE_CLOUD_PROJECT="your-gcp-project"
+export GOOGLE_CLOUD_LOCATION="global"  # or a region like us-central1
 ```
 
 ### Basic Usage
@@ -416,7 +423,7 @@ mypy src
 
 # Linting
 ruff check src
-black --check src
+ruff format --check .
 ```
 
 ## Project Structure
