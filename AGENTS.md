@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-The core Python package lives in `src/`, with `src/orchestrator.py` as the main entry point, `src/credentials.py` for secure key handling, and `src/storage.py` for persistence. UI clients are organized under `src/gui/` (PySide6), `src/tui/` (Textual), and `src/menubar/` (rumps). Configuration lives in `config/` (`config-schema.json`, `config.sample.json`), tests in `tests/`, and the VS Code extension under `vscode-extension/`. Build artifacts land in `dist/` and `build/`.
+The core Python package lives in `src/`, with `src/orchestrator.py` as the main entry point, `src/credentials.py` for secure key handling, `src/storage.py` for persistence, and `src/manage_models.py` for local model cleanup/download management. UI clients are organized under `src/gui/` (PySide6), `src/tui/` (Textual), and `src/menubar/` (rumps). Configuration lives in `config/` (`config-schema.json`, `config.sample.json`), tests in `tests/`, and the VS Code extension under `vscode-extension/`. Build artifacts land in `dist/` and `build/`.
 
 ## Build, Test, and Development Commands
 
@@ -11,6 +11,7 @@ The core Python package lives in `src/`, with `src/orchestrator.py` as the main 
 - `python -m src.orchestrator "..."` or `ai-orchestrator "..."` runs the CLI.
 - `ai-app`, `ai-chat`, and `ai-menubar` run the GUI, TUI, and menu bar apps.
 - `python -m src.gui.app`, `python -m src.tui.app`, `python -m src.menubar.app` run UI apps directly.
+- `python -m src.manage_models` manages local model cache (disk cleanup).
 - `python setup_app.py py2app` builds the macOS `.app` bundle.
 - `cd vscode-extension && npm install && npm run package` builds the VS Code extension.
 - `pytest` runs all tests; `pytest --cov=src --cov-report=html` generates coverage.
@@ -51,6 +52,31 @@ Credentials fall back in this order:
 1. System keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
 2. Encrypted file (`~/.ai_orchestrator/credentials.enc`)
 3. Environment variables
+
+## Data Flow
+
+1. Prompt validation via `InputValidator.validate_prompt()`
+2. Task classification via `TaskClassifier.classify()`
+3. Optional smart cache detection for local models
+4. Model selection via `AIOrchestrator.select_model()`
+5. Provider initialization via `AIOrchestrator._get_provider()`
+6. Request execution with retries via `RetryHandler.execute_with_retry()`
+
+## Local Model Optimization (Smart Cache)
+
+For MLX/MusicGen, the orchestrator checks the local Hugging Face cache first. If a model is cached locally, it sets `HF_HUB_OFFLINE=1` to avoid network downloads and load from disk; otherwise it stays online and allows on-demand downloads.
+
+## Model Selection Algorithm
+
+Scoring factors include task match, provider characteristics, avoid-for penalties, cost optimization, context window bonuses, and a local model bonus when `prefer_local` is enabled.
+
+## Async Pattern
+
+Providers use async calls with `asyncio` and `httpx`, with SDK async clients where available.
+
+## Configuration
+
+User config: `~/.ai_orchestrator/config.json`. Schema and samples live in `config/`.
 
 ## Coding Style & Naming Conventions
 
