@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Security: Hardened](https://img.shields.io/badge/security-hardened-green.svg)](https://github.com/jasonvassallo/ai-orchestrator/security)
 
-AI Orchestrator automatically routes your queries to the best AI model based on task type. It supports **10 providers** including OpenAI, Anthropic Claude, Google Gemini, Mistral, Groq, xAI (Grok), Perplexity, DeepSeek, Ollama, and MLX (Apple Silicon optimized) - all with secure credential management and production-ready features.
+AI Orchestrator automatically routes your queries to the best AI model based on task type. It supports **11 providers** including OpenAI, Anthropic Claude, Google Gemini, Vertex AI, Mistral, Groq, xAI (Grok), Perplexity, DeepSeek, Ollama, and MLX (Apple Silicon optimized) - all with secure credential management and production-ready features.
 
 ## Features
 
@@ -216,6 +216,15 @@ python setup_app.py py2app
 | `gemini-2.0-flash` | Speed, long docs | 1M | Massive context, fast |
 | `gemini-1.5-pro` | Very long docs | 2M | Largest context window |
 
+### Vertex AI (Google Cloud)
+
+| Model | Best For | Context | Strengths |
+|-------|----------|---------|-----------|
+| `vertex-gemini-3-pro` | Enterprise, complex tasks | 1M | Enterprise-grade, latest Gemini |
+| `vertex-gemini-2.5-flash` | Enterprise, speed | 1M | Fast enterprise inference |
+
+> **Note:** Vertex AI uses Google Cloud ADC instead of API keys. See [Configure Credentials](#configure-credentials-required) for setup.
+
 ### Mistral
 
 | Model | Best For | Context | Strengths |
@@ -270,6 +279,7 @@ Based on which providers you want to use:
 | OpenAI | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) | Recommended |
 | Anthropic | [console.anthropic.com](https://console.anthropic.com/) | Recommended |
 | Google | [aistudio.google.com](https://aistudio.google.com/apikey) | Optional |
+| Vertex AI | ADC via `gcloud auth` (see above) | Optional |
 | Mistral | [console.mistral.ai](https://console.mistral.ai/) | Optional |
 | Groq | [console.groq.com](https://console.groq.com/) | Optional |
 | xAI | [console.x.ai](https://console.x.ai/) | Optional |
@@ -432,7 +442,7 @@ ruff format --check .
 ai-orchestrator/
 ├── src/
 │   ├── __init__.py
-│   ├── orchestrator.py    # Main orchestrator logic (25+ models, 10 providers)
+│   ├── orchestrator.py    # Main orchestrator logic (25+ models, 11 providers)
 │   ├── credentials.py     # Secure credential management
 │   ├── storage.py         # Conversation storage (SQLite)
 │   ├── music.py           # Music generation (MIDI + MusicGen audio)
@@ -508,10 +518,11 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 - Anthropic for Claude
 - OpenAI for GPT models
-- Google for Gemini
+- Google for Gemini and Vertex AI
 - Mistral AI for Codestral
 - Groq for fast inference
 - xAI for Grok
 - Perplexity for web search
 - DeepSeek for cost-effective models
 - Ollama for local model support
+- Apple for MLX framework
