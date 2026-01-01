@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-The core Python package lives in `src/`, with `src/orchestrator.py` as the main entry point, `src/credentials.py` for secure key handling, `src/storage.py` for persistence, and `src/manage_models.py` for local model cleanup/download management. UI clients are organized under `src/gui/` (PySide6), `src/tui/` (Textual), and `src/menubar/` (rumps). Configuration lives in `config/` (`config-schema.json`, `config.sample.json`), tests in `tests/`, and the VS Code extension under `vscode-extension/`. Build artifacts land in `dist/` and `build/`.
+The core Python package lives in `src/`, with `src/orchestrator.py` as the main entry point, `src/credentials.py` for secure key handling, `src/storage.py` for persistence, and `src/manage_models.py` for local model cleanup/download management. UI clients are organized under `src/gui/` (PySide6), `src/tui/` (Textual), and `src/menubar/` (rumps). Configuration lives in `config/` (`config-schema.json`, `config.sample.json`), tests in `tests/`, helper scripts in `scripts/`, and the VS Code extension under `vscode-extension/`. Build artifacts land in `dist/` and `build/`.
 
 ## Build, Test, and Development Commands
 
@@ -60,7 +60,7 @@ Credentials fall back in this order:
 3. Optional smart cache detection for local models
 4. Model selection via `AIOrchestrator.select_model()`
 5. Provider initialization via `AIOrchestrator._get_provider()`
-6. Request execution with retries via `RetryHandler.execute_with_retry()`
+6. Request execution with retries via `RetryHandler.execute_with_retry()` (retryable APIResponse errors and Vertex AI HTTP failures are surfaced for backoff)
 
 ## Local Model Optimization (Smart Cache)
 

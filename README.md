@@ -16,6 +16,7 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 - **Intelligent Routing**: Automatically selects the best model based on task classification
 - **Secure Credentials**: API keys stored in OS keychain or encrypted file - NEVER in code
 - **High Performance**: Async operations, rate limiting, and retry logic with exponential backoff
+- **Vertex AI Resilience**: Structured retryable 429/resource-exhausted handling with clearer error messages
 - **Security Hardened**: Input validation, audit logging, no credential leakage
 - **VS Code Extension**: Full-featured extension with keyboard shortcuts
 - **Local Models**: Privacy-first option with Ollama support
@@ -126,6 +127,13 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Utilities
+
+Helper scripts for Gemini CLI troubleshooting live in `scripts/`:
+
+- `scripts/gemini-retry.sh`: Wraps `gemini` to retry 429/resource-exhausted responses with backoff.
+- `scripts/gemini-429-diagnose.sh`: Parses Gemini debug logs to classify rate-limit vs quota exhaustion signals.
 
 ## Mac Applications
 
