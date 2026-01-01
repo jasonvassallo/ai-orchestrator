@@ -447,7 +447,8 @@ def create_combined_midi(params: MusicParameters, filename_base: str) -> str:
             if pattern[step % pattern_len]:
                 time = step / steps_per_beat
                 velocity = min(
-                    127, 80 + int(params.energy * 40) + random.randint(-8, 8)  # noqa: S311
+                    127,
+                    80 + int(params.energy * 40) + random.randint(-8, 8),  # noqa: S311
                 )
                 midi.addNote(0, 9, note, time, 0.2, velocity)
 
@@ -543,7 +544,9 @@ async def generate_audio_with_musicgen(
         model_id = "facebook/musicgen-small"
         try:
             processor = AutoProcessor.from_pretrained(model_id, local_files_only=True)
-            model = MusicgenForConditionalGeneration.from_pretrained(model_id, local_files_only=True)
+            model = MusicgenForConditionalGeneration.from_pretrained(
+                model_id, local_files_only=True
+            )
         except OSError:
             # Fallback to downloading if not found locally
             print(f"Model {model_id} not found locally. Downloading...")

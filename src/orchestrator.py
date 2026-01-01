@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any
 
+import httpx
+
 if TYPE_CHECKING:
     from google.auth import credentials as auth_credentials
     from google.oauth2 import service_account
@@ -39,6 +41,43 @@ from .credentials import get_api_key
 
 # Configure logging with security in mind (no sensitive data in logs)
 logger = logging.getLogger(__name__)
+
+
+def format_http_error(exc: httpx.HTTPStatusError) -> str:
+    """Format detailed error message from HTTP exception."""
+    response = exc.response
+    status_code = response.status_code
+    message = response.reason_phrase or str(exc)
+    retry_after = response.headers.get("Retry-After")
+
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+
+    if isinstance(payload, dict):
+        error_info = payload.get("error")
+        if isinstance(error_info, dict):
+            error_message = error_info.get("message")
+            if error_message:
+                message = error_message
+            details = error_info.get("details", [])
+            if isinstance(details, list):
+                for detail in details:
+                    if (
+                        isinstance(detail, dict)
+                        and detail.get("@type")
+                        == "type.googleapis.com/google.rpc.RetryInfo"
+                    ):
+                        retry_delay = detail.get("retryDelay")
+                        if retry_delay:
+                            message = f"{message} Suggested retry after {retry_delay}."
+                        break
+
+    if retry_after:
+        message = f"{message} Retry-After: {retry_after}."
+
+    return f"HTTP {status_code}: {message}"
 
 
 class TaskType(Enum):
@@ -251,10 +290,15 @@ class RetryHandler:
     """Exponential backoff retry handler"""
 
     RETRYABLE_ERRORS = [
+        "429",
         "rate_limit",
+        "rate limit",
         "timeout",
         "connection",
         "overloaded",
+        "resource exhausted",
+        "too many requests",
+        "quota",
         "503",
         "502",
         "500",
@@ -574,7 +618,9 @@ class VertexAIProvider(BaseProvider):
         super().__init__(rate_limiter)
         self.project_id = project_id
         self.location = location
-        self._credentials: auth_credentials.Credentials | service_account.Credentials | None = None
+        self._credentials: (
+            auth_credentials.Credentials | service_account.Credentials | None
+        ) = None
 
     @property
     def provider_name(self) -> str:
@@ -743,6 +789,39 @@ class VertexAIProvider(BaseProvider):
                 metadata={"endpoint_url": url},
             )
 
+        except httpx.HTTPStatusError as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=format_http_error(e),
+                metadata={"endpoint_url": self.get_endpoint_url(model)},
+            )
+        except httpx.TimeoutException as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=f"Timeout error: {e}",
+                metadata={"endpoint_url": self.get_endpoint_url(model)},
+            )
+        except httpx.RequestError as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=f"Connection error: {e}",
+                metadata={"endpoint_url": self.get_endpoint_url(model)},
+            )
         except Exception as e:
             return APIResponse(
                 content="",
@@ -752,6 +831,7 @@ class VertexAIProvider(BaseProvider):
                 latency_ms=(time.time() - start_time) * 1000,
                 success=False,
                 error=str(e),
+                metadata={"endpoint_url": self.get_endpoint_url(model)},
             )
 
 
@@ -1242,13 +1322,13 @@ class MLXProvider(BaseProvider):
     def __init__(
         self,
         rate_limiter: RateLimiter,
-        model_path: str = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit"
+        model_path: str = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
     ):
         super().__init__(rate_limiter)
         self.model_path = model_path
         self._available = False
-        self._model = None
-        self._tokenizer = None
+        self._model: Any = None
+        self._tokenizer: Any = None
 
     @property
     def provider_name(self) -> str:
@@ -1257,16 +1337,16 @@ class MLXProvider(BaseProvider):
     async def initialize(self) -> bool:
         """Initialize MLX model and tokenizer"""
         try:
-            import mlx.core as mx
-            from mlx_lm import load
-            from huggingface_hub import try_to_load_from_cache
             import os
+
+            import mlx.core as mx
+            from huggingface_hub import try_to_load_from_cache
+            from mlx_lm import load
 
             # Smart Cache Detection
             # Check if the model's config is already in the Hugging Face cache
             cached_config = try_to_load_from_cache(
-                repo_id=self.model_path, 
-                filename="config.json"
+                repo_id=self.model_path, filename="config.json"
             )
 
             if cached_config:
@@ -1284,7 +1364,15 @@ class MLXProvider(BaseProvider):
                 # We can still run on CPU, but it will be slower
 
             logger.info(f"Loading MLX model: {self.model_path}")
-            self._model, self._tokenizer = load(self.model_path)
+            # Load returns model, tokenizer, and optionally config (ignore extra)
+            result = load(self.model_path)
+            if isinstance(result, tuple) and len(result) >= 2:
+                self._model = result[0]
+                self._tokenizer = result[1]
+            else:
+                # Fallback if signature matches expectation exactly
+                self._model, self._tokenizer = result
+
             self._available = True
             return True
 
@@ -1301,9 +1389,9 @@ class MLXProvider(BaseProvider):
     async def complete(
         self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
-        if not self._available and not self._model:
+        if not self._available or self._model is None or self._tokenizer is None:
             success = await self.initialize()
-            if not success:
+            if not success or self._model is None or self._tokenizer is None:
                 return APIResponse(
                     content="",
                     model=model,
@@ -1322,9 +1410,7 @@ class MLXProvider(BaseProvider):
             # Convert messages to prompt using tokenizer's template if available
             if hasattr(self._tokenizer, "apply_chat_template"):
                 prompt = self._tokenizer.apply_chat_template(
-                    messages,
-                    tokenize=False,
-                    add_generation_prompt=True
+                    messages, tokenize=False, add_generation_prompt=True
                 )
             else:
                 prompt = self._format_messages(messages)
@@ -1336,7 +1422,7 @@ class MLXProvider(BaseProvider):
                 self._tokenizer,
                 prompt=prompt,
                 max_tokens=kwargs.get("max_tokens", 1024),
-                verbose=False
+                verbose=False,
             )
 
             latency = (time.time() - start_time) * 1000
@@ -2620,15 +2706,27 @@ class AIOrchestrator:
         self.conversation_history.extend(messages)
 
         # Query the provider with retry logic
-        try:
-            response = await RetryHandler.execute_with_retry(
-                lambda: provider.complete(
-                    self.conversation_history,
-                    model=model.model_id,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                )
+        last_response: APIResponse | None = None
+
+        async def _attempt() -> APIResponse:
+            nonlocal last_response
+            response = await provider.complete(
+                self.conversation_history,
+                model=model.model_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
             )
+            last_response = response
+            if (
+                not response.success
+                and response.error
+                and RetryHandler.is_retryable(response.error)
+            ):
+                raise RuntimeError(response.error)
+            return response
+
+        try:
+            response = await RetryHandler.execute_with_retry(_attempt)
             # Add successful response to history
             if response.success and response.content:
                 self.conversation_history.append(
@@ -2642,6 +2740,8 @@ class AIOrchestrator:
             return response
         except Exception as e:
             logger.error(f"Query failed after retries: {e}")
+            if last_response is not None:
+                return last_response
             return APIResponse(
                 content="",
                 model=model.name,

@@ -20,9 +20,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.credentials import (
     EnvironmentBackend,
 )
+import src.orchestrator as orchestrator_module
 from src.orchestrator import (
     AIOrchestrator,
     APIResponse,
+    BaseProvider,
     InputValidator,
     ModelRegistry,
     RateLimiter,
@@ -214,6 +216,8 @@ class TestRetryHandler:
             "connection timeout",
             "503 service unavailable",
             "server overloaded",
+            "HTTP 429: Resource exhausted",
+            "Too many requests",
         ]
 
         for error in retryable_errors:
@@ -337,6 +341,63 @@ class TestAIOrchestrator:
 
         orchestrator.clear_history()
         assert len(orchestrator.conversation_history) == 0
+
+    @pytest.mark.asyncio
+    async def test_query_retries_on_retryable_apiresponse(self, monkeypatch):
+        """Should retry when provider returns a retryable APIResponse error"""
+
+        class FakeVertexProvider(BaseProvider):
+            def __init__(self, rate_limiter: RateLimiter) -> None:
+                super().__init__(rate_limiter)
+                self.calls = 0
+
+            @property
+            def provider_name(self) -> str:
+                return "vertex-ai"
+
+            async def initialize(self) -> bool:
+                return True
+
+            async def complete(self, messages, model, **kwargs):
+                self.calls += 1
+                if self.calls < 3:
+                    return APIResponse(
+                        content="",
+                        model=model,
+                        provider=self.provider_name,
+                        usage={},
+                        latency_ms=0,
+                        success=False,
+                        error="HTTP 429: Resource exhausted",
+                    )
+                return APIResponse(
+                    content="ok",
+                    model=model,
+                    provider=self.provider_name,
+                    usage={},
+                    latency_ms=0,
+                    success=True,
+                )
+
+        orchestrator = AIOrchestrator(verbose=False)
+        provider = FakeVertexProvider(orchestrator.rate_limiter)
+
+        async def fake_get_provider(_name):
+            return provider
+
+        async def fast_sleep(_delay):
+            return None
+
+        monkeypatch.setattr(orchestrator, "_get_provider", fake_get_provider)
+        monkeypatch.setattr(orchestrator_module.asyncio, "sleep", fast_sleep)
+
+        response = await orchestrator.query(
+            "Hello", model_override="vertex-gemini-3-pro"
+        )
+
+        assert response.success is True
+        assert response.content == "ok"
+        assert provider.calls == 3
 
 
 class TestAPIResponse:
