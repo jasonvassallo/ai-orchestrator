@@ -221,6 +221,10 @@ python setup_app.py py2app
 
 | Model | Best For | Context | Strengths |
 |-------|----------|---------|-----------|
+| `gemini-3-pro` | Complex tasks, coding | 2M | Next-gen intelligence, massive context |
+| `gemini-3-flash` | Speed, multimodal | 1M | Next-gen speed, cost-effective |
+| `gemini-2.5-pro` | Reasoning, coding | 2M | Advanced reasoning, stable |
+| `gemini-2.5-flash` | Speed, production | 1M | Fast, stable, efficient |
 | `gemini-2.0-flash` | Speed, long docs | 1M | Massive context, fast |
 | `gemini-1.5-pro` | Very long docs | 2M | Largest context window |
 

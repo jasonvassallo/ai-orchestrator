@@ -15,6 +15,7 @@ Output:
 """
 
 import sys
+
 from setuptools import setup
 
 # Ensure we're on macOS

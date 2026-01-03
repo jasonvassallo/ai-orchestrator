@@ -646,9 +646,7 @@ class VertexAIProvider(BaseProvider):
                     self._credentials = creds
                     if not self.project_id and project:
                         self.project_id = project
-                    logger.info(
-                        f"Loaded Vertex AI credentials from {credentials_path}"
-                    )
+                    logger.info(f"Loaded Vertex AI credentials from {credentials_path}")
                 except Exception as e:
                     logger.warning(
                         "Failed to load credentials from %s; falling back to ADC: %s",
@@ -2450,13 +2448,40 @@ class AIOrchestrator:
         self.conversation_history: list[dict[str, Any]] = []
         self._max_history_messages = 200
 
-        self._setup_logging()
+        # Load config first so we can use it for logging setup
         self._user_config = self._load_user_config()
+        self._setup_logging()
 
     def _setup_logging(self) -> None:
         level = logging.DEBUG if self.verbose else logging.INFO
+
+        # Check config for logging overrides
+        log_config = self._user_config.get("logging", {})
+        if not self.verbose and "level" in log_config:
+            level_name = log_config["level"].upper()
+            level = getattr(logging, level_name, logging.INFO)
+
+        handlers: list[logging.Handler] = [logging.StreamHandler()]
+
+        # Add file handler if configured
+        log_file = log_config.get("file")
+        if log_file:
+            try:
+                # Expand user path if necessary
+                import os
+
+                expanded_path = os.path.expanduser(log_file)
+                handlers.append(logging.FileHandler(expanded_path, encoding="utf-8"))
+            except Exception as e:
+                # Fallback to console only if file setup fails
+                print(f"Failed to setup log file {log_file}: {e}")
+
+        # Configure root logger to capture all events
         logging.basicConfig(
-            level=level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            level=level,
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+            handlers=handlers,
+            force=True,  # Force reconfiguration
         )
 
     def _load_user_config(self) -> dict[str, Any]:
@@ -2468,11 +2493,12 @@ class AIOrchestrator:
             with config_path.open("r", encoding="utf-8") as config_file:
                 loaded = json.load(config_file)
         except Exception as exc:
-            logger.warning("Failed to load config from %s: %s", config_path, exc)
+            # Can't log yet as logging isn't set up, use print
+            print(f"Warning: Failed to load config from {config_path}: {exc}")
             return {}
 
         if not isinstance(loaded, dict):
-            logger.warning("Config file %s did not contain an object.", config_path)
+            print(f"Warning: Config file {config_path} did not contain an object.")
             return {}
 
         return loaded
@@ -2533,6 +2559,24 @@ class AIOrchestrator:
 
         return self.providers.get(provider_name)
 
+    def _get_config_task_key(self, task_type: TaskType) -> str:
+        """Map TaskType enum to config string keys"""
+        mapping = {
+            TaskType.CODE_GENERATION: "code",
+            TaskType.REASONING: "reasoning",
+            TaskType.DEEP_REASONING: "reasoning",
+            TaskType.CREATIVE_WRITING: "creative",
+            TaskType.SUMMARIZATION: "summarization",
+            TaskType.LOCAL_MODEL: "local",
+            TaskType.LONG_CONTEXT: "long-context",
+            TaskType.WEB_SEARCH: "websearch",
+            TaskType.MATH: "math",
+            TaskType.DATA_ANALYSIS: "data-analysis",
+            TaskType.MULTIMODAL: "multimodal",
+            TaskType.GENERAL_NLP: "general",
+        }
+        return mapping.get(task_type, "general")
+
     def select_model(
         self,
         task_types: list[tuple[TaskType, float]],
@@ -2545,6 +2589,7 @@ class AIOrchestrator:
         2. Provider characteristics (strengths/weaknesses)
         3. Cost optimization (if enabled)
         4. Context window size (for long context tasks)
+        5. User configuration (routing and priority)
         """
         if not task_types:
             task_types = [(TaskType.GENERAL_NLP, 0.5)]
@@ -2552,14 +2597,61 @@ class AIOrchestrator:
         primary_task = task_types[0][0]
         all_tasks = [t[0] for t in task_types]
 
-        # Get suitable models
-        candidates = ModelRegistry.get_models_for_task(
-            primary_task, require_local=self.prefer_local
-        )
+        # 1. Check User Config for Task Routing
+        # This overrides standard selection if a valid route is defined
+        task_key = self._get_config_task_key(primary_task)
+        routing_config = self._user_config.get("taskRouting", {})
+        preferred_models = routing_config.get(task_key)
+
+        candidates = []
+
+        if preferred_models and isinstance(preferred_models, list):
+            # If user specified models for this task, restrict to those
+            for model_key in preferred_models:
+                model = ModelRegistry.get_model(model_key)
+                if model:
+                    candidates.append(model)
+
+            if self.verbose and candidates:
+                logger.info(
+                    f"Using custom routing for '{task_key}': {[m.name for m in candidates]}"
+                )
+
+        # If no custom routing or no valid models found in routing, use standard selection
+        if not candidates:
+            candidates = ModelRegistry.get_models_for_task(
+                primary_task, require_local=self.prefer_local
+            )
 
         if not candidates:
             # Fallback to any available model
             candidates = list(ModelRegistry.MODELS.values())
+
+        # 2. Filter by User Config (Enabled/Disabled)
+        model_config = self._user_config.get("models", {})
+        filtered_candidates = []
+        for model in candidates:
+            # Check if model is explicitly disabled in config
+            # Try matching by specific model ID or registry key
+            specific_config = model_config.get(model.model_id)
+
+            # If not found by model_id, try to find by registry key (more expensive)
+            if not specific_config:
+                for reg_key, reg_model in ModelRegistry.MODELS.items():
+                    if reg_model == model:
+                        specific_config = model_config.get(reg_key)
+                        break
+
+            if specific_config and specific_config.get("enabled") is False:
+                if self.verbose:
+                    logger.info(f"Skipping disabled model: {model.name}")
+                continue
+
+            filtered_candidates.append(model)
+
+        candidates = filtered_candidates
+        if not candidates:
+            return None
 
         # Score candidates using provider characteristics
         scored = []
@@ -2625,6 +2717,22 @@ class AIOrchestrator:
             if TaskType.LOCAL_MODEL in all_tasks:
                 if model.provider in {"ollama", "mlx"}:
                     score += 5.0  # Significant bonus for local/private
+
+            # 6. User Priority Bonus
+            # Add bonus based on user priority config (default 50)
+            specific_config = model_config.get(model.model_id)
+            # Try lookup by registry key if needed
+            if not specific_config:
+                for reg_key, reg_model in ModelRegistry.MODELS.items():
+                    if reg_model == model:
+                        specific_config = model_config.get(reg_key)
+                        break
+
+            if specific_config:
+                priority = specific_config.get("priority", 50)
+                # Map 0-100 priority to roughly -5 to +5 score adjustment
+                priority_bonus = (priority - 50) / 10.0
+                score += priority_bonus
 
             scored.append((model, score))
 

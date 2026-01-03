@@ -17,10 +17,10 @@ import pytest
 # Add src to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import src.orchestrator as orchestrator_module
 from src.credentials import (
     EnvironmentBackend,
 )
-import src.orchestrator as orchestrator_module
 from src.orchestrator import (
     AIOrchestrator,
     APIResponse,
