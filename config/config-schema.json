@@ -120,6 +120,16 @@
               "default": "https://api.anthropic.com"
             }
           }
+        },
+        "vertex-ai": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string",
+              "description": "Vertex AI location (use 'global' for preview/global-only models)",
+              "default": "global"
+            }
+          }
         }
       }
     },

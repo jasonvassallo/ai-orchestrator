@@ -59,6 +59,9 @@
     },
     "anthropic": {
       "baseUrl": "https://api.anthropic.com"
+    },
+    "vertex-ai": {
+      "location": "global"
     }
   },
   

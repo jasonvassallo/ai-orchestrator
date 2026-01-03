@@ -229,6 +229,7 @@ python setup_app.py py2app
 | Model | Best For | Context | Strengths |
 |-------|----------|---------|-----------|
 | `vertex-gemini-3-pro` | Enterprise, complex tasks | 1M | Enterprise-grade, latest Gemini |
+| `vertex-gemini-3-flash` | Enterprise, speed | 1M | Fast enterprise inference |
 | `vertex-gemini-2.5-flash` | Enterprise, speed | 1M | Fast enterprise inference |
 
 > **Note:** Vertex AI uses Google Cloud ADC instead of API keys. See [Configure Credentials](#configure-credentials-required) for setup.
@@ -392,6 +393,18 @@ Copy `config/config.sample.json` to `~/.ai_orchestrator/config.json`:
     "reasoning": ["o1", "claude-opus-4.5", "deepseek-reasoner"],
     "websearch": ["perplexity-sonar-pro", "perplexity-sonar"],
     "local": ["llama3.2", "deepseek-coder-v2"]
+  }
+}
+```
+
+To override the Vertex AI location (defaults to `global`), add:
+
+```json
+{
+  "providers": {
+    "vertex-ai": {
+      "location": "global"
+    }
   }
 }
 ```

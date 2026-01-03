@@ -20,6 +20,7 @@ Security Features:
 """
 
 import asyncio
+import json
 import logging
 import re
 import time
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
     from google.oauth2 import service_account
 
 # Import our secure credential manager
-from .credentials import get_api_key
+from .credentials import CONFIG_DIR, get_api_key
 
 # Configure logging with security in mind (no sensitive data in logs)
 logger = logging.getLogger(__name__)
@@ -613,7 +614,7 @@ class VertexAIProvider(BaseProvider):
         self,
         rate_limiter: RateLimiter,
         project_id: str | None = None,
-        location: str = "us-central1",
+        location: str = "global",
     ):
         super().__init__(rate_limiter)
         self.project_id = project_id
@@ -637,15 +638,30 @@ class VertexAIProvider(BaseProvider):
             credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 
             if credentials_path and os.path.exists(credentials_path):
-                from google.oauth2 import service_account
-
-                self._credentials = (
-                    service_account.Credentials.from_service_account_file(
+                try:
+                    creds, project = google.auth.load_credentials_from_file(
                         credentials_path,
                         scopes=["https://www.googleapis.com/auth/cloud-platform"],
                     )
-                )
-                logger.info(f"Loaded Vertex AI credentials from {credentials_path}")
+                    self._credentials = creds
+                    if not self.project_id and project:
+                        self.project_id = project
+                    logger.info(
+                        f"Loaded Vertex AI credentials from {credentials_path}"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to load credentials from %s; falling back to ADC: %s",
+                        credentials_path,
+                        e,
+                    )
+                    creds, project = google.auth.default(
+                        scopes=["https://www.googleapis.com/auth/cloud-platform"]
+                    )
+                    self._credentials = creds
+                    if not self.project_id:
+                        self.project_id = project
+                    logger.info("Using application default credentials for Vertex AI")
             else:
                 # Try application default credentials
                 creds: Any
@@ -704,8 +720,13 @@ class VertexAIProvider(BaseProvider):
         Get the REST endpoint URL for a model.
         This URL can be shared with third-party platforms.
         """
+        base_host = (
+            "aiplatform.googleapis.com"
+            if self.location == "global"
+            else f"{self.location}-aiplatform.googleapis.com"
+        )
         return (
-            f"https://{self.location}-aiplatform.googleapis.com/v1/"
+            f"https://{base_host}/v1/"
             f"projects/{self.project_id}/locations/{self.location}/"
             f"publishers/google/models/{model}:generateContent"
         )
@@ -2125,6 +2146,22 @@ class ModelRegistry:
             supports_vision=True,
             supports_functions=True,
         ),
+        "vertex-gemini-3-flash": ModelCapability(
+            name="Gemini 3.0 Flash (Vertex AI)",
+            provider="vertex-ai",
+            model_id="gemini-3-flash-preview",
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.LONG_CONTEXT,
+                TaskType.MULTIMODAL,
+            ),
+            context_window=1000000,
+            cost_per_1k_input=0.0001,
+            cost_per_1k_output=0.0004,
+            strengths=("enterprise endpoint", "fast", "multimodal"),
+            supports_vision=True,
+        ),
         "vertex-gemini-2.5-flash": ModelCapability(
             name="Gemini 2.5 Flash (Vertex AI)",
             provider="vertex-ai",
@@ -2414,12 +2451,42 @@ class AIOrchestrator:
         self._max_history_messages = 200
 
         self._setup_logging()
+        self._user_config = self._load_user_config()
 
     def _setup_logging(self) -> None:
         level = logging.DEBUG if self.verbose else logging.INFO
         logging.basicConfig(
             level=level, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
+
+    def _load_user_config(self) -> dict[str, Any]:
+        config_path = CONFIG_DIR / "config.json"
+        if not config_path.exists():
+            return {}
+
+        try:
+            with config_path.open("r", encoding="utf-8") as config_file:
+                loaded = json.load(config_file)
+        except Exception as exc:
+            logger.warning("Failed to load config from %s: %s", config_path, exc)
+            return {}
+
+        if not isinstance(loaded, dict):
+            logger.warning("Config file %s did not contain an object.", config_path)
+            return {}
+
+        return loaded
+
+    def _get_provider_config(self, provider_name: str) -> dict[str, Any]:
+        providers = self._user_config.get("providers", {})
+        if not isinstance(providers, dict):
+            return {}
+
+        provider_config = providers.get(provider_name, {})
+        if not isinstance(provider_config, dict):
+            return {}
+
+        return provider_config
 
     async def _get_provider(self, provider_name: str) -> BaseProvider | None:
         """Get or initialize a provider"""
@@ -2432,7 +2499,12 @@ class AIOrchestrator:
             elif provider_name == "google":
                 provider = GoogleProvider(self.rate_limiter)
             elif provider_name == "vertex-ai":
-                provider = VertexAIProvider(self.rate_limiter)
+                provider_config = self._get_provider_config("vertex-ai")
+                location = provider_config.get("location")
+                if isinstance(location, str) and location:
+                    provider = VertexAIProvider(self.rate_limiter, location=location)
+                else:
+                    provider = VertexAIProvider(self.rate_limiter)
             elif provider_name == "ollama":
                 provider = OllamaProvider(self.rate_limiter)
             elif provider_name == "mistral":
