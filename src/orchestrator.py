@@ -662,8 +662,6 @@ class VertexAIProvider(BaseProvider):
                     logger.info("Using application default credentials for Vertex AI")
             else:
                 # Try application default credentials
-                creds: Any
-                project: Any
                 creds, project = google.auth.default(
                     scopes=["https://www.googleapis.com/auth/cloud-platform"]
                 )
