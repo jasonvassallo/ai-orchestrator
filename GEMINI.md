@@ -48,6 +48,8 @@ python -m src.menubar.app  # or: ai-menubar
 
 # Manage local models (cleanup/download)
 python -m src.manage_models
+python -m src.manage_models --yes           # Non-interactive download/cleanup
+python -m src.manage_models --yes --no-clean  # Skip cache cleanup
 
 # Configure credentials
 python -m src.credentials  # or: ai-configure

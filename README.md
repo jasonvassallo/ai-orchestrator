@@ -135,6 +135,18 @@ Helper scripts for Gemini CLI troubleshooting live in `scripts/`:
 - `scripts/gemini-retry.sh`: Wraps `gemini` to retry 429/resource-exhausted responses with backoff.
 - `scripts/gemini-429-diagnose.sh`: Parses Gemini debug logs to classify rate-limit vs quota exhaustion signals.
 
+## Model Management
+
+Use the model manager to check/download recommended local models and clean cache:
+
+```bash
+python -m src.manage_models
+python -m src.manage_models --yes
+python -m src.manage_models --yes --no-clean
+```
+
+It includes MLX Llama 3.1 8B and MLX Qwen 3 32B (large; close other apps for best results), plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
+
 ## Mac Applications
 
 AI Orchestrator includes three beautiful interface options:
