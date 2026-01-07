@@ -11,7 +11,15 @@ httpx>=0.25.0
 # AI Provider SDKs (optional - install based on which providers you use)
 openai>=1.0.0
 anthropic>=0.18.0
-google-generativeai>=0.3.0
+# Use the new official Google SDK (matches code in src/orchestrator.py)
+google-genai>=1.0.0
+mlx>=0.6.0
+huggingface-hub>=0.20.0
+transformers>=4.36.0
+scipy>=1.11.0
+torch>=2.0.0
+tqdm>=4.66.0
+midiutil>=1.2.1
 
 # Secure credential storage
 cryptography>=41.0.0
@@ -29,3 +37,9 @@ rich>=13.7.0
 
 # Menu bar app (macOS only)
 rumps>=0.4.0
+
+# --- Compatibility pins ---
+# Some environments include google-cloud-* libraries (e.g., google-cloud-storage)
+# which require google-api-core>=2.27.0,<3. To avoid resolver downgrades and
+# warnings when these are present, keep api-core on a compatible track.
+google-api-core>=2.27.0,<3
