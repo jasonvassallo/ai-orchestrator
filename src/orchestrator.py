@@ -42,6 +42,7 @@ from .credentials import CONFIG_DIR, get_api_key
 
 # Configure logging with security in mind (no sensitive data in logs)
 logger = logging.getLogger(__name__)
+LOCAL_PROVIDERS = {"ollama", "mlx"}
 
 
 def format_http_error(exc: httpx.HTTPStatusError) -> str:
@@ -2407,11 +2408,10 @@ class ModelRegistry:
         require_local: bool = False,
     ) -> list[ModelCapability]:
         """Get models suitable for a task type"""
-        local_providers = {"ollama", "mlx"}  # Both are local inference providers
         suitable = []
         for model in cls.MODELS.values():
             if task_type in model.task_types:
-                if require_local and model.provider not in local_providers:
+                if require_local and model.provider not in LOCAL_PROVIDERS:
                     continue
                 suitable.append(model)
 
@@ -2433,12 +2433,10 @@ class AIOrchestrator:
 
     def __init__(
         self,
-        prefer_local: bool = False,
-        cost_optimize: bool = False,
+        prefer_local: bool | None = None,
+        cost_optimize: bool | None = None,
         verbose: bool = False,
     ) -> None:
-        self.prefer_local = prefer_local
-        self.cost_optimize = cost_optimize
         self.verbose = verbose
 
         self.rate_limiter = RateLimiter()
@@ -2448,7 +2446,77 @@ class AIOrchestrator:
 
         # Load config first so we can use it for logging setup
         self._user_config = self._load_user_config()
+        defaults = self._get_defaults_config()
+        self.prefer_local = self._resolve_bool_config(
+            prefer_local, defaults, "preferLocal"
+        )
+        self.cost_optimize = self._resolve_bool_config(
+            cost_optimize, defaults, "costOptimize"
+        )
+        self.local_provider_preference = self._resolve_local_provider_preference(
+            defaults
+        )
         self._setup_logging()
+
+    def _get_defaults_config(self) -> dict[str, Any]:
+        defaults = self._user_config.get("defaults", {})
+        if isinstance(defaults, dict):
+            return defaults
+        return {}
+
+    @staticmethod
+    def _resolve_bool_config(
+        value: bool | None, defaults: dict[str, Any], key: str
+    ) -> bool:
+        if value is not None:
+            return value
+
+        config_value = defaults.get(key)
+        if isinstance(config_value, bool):
+            return config_value
+
+        return False
+
+    @staticmethod
+    def _resolve_local_provider_preference(
+        defaults: dict[str, Any],
+    ) -> str | None:
+        config_value = defaults.get("localProvider")
+        if not isinstance(config_value, str):
+            return None
+
+        normalized = config_value.strip().lower()
+        if normalized in {"mlx", "ollama"}:
+            return normalized
+        if normalized in {"any", ""}:
+            return None
+
+        return None
+
+    def _apply_local_provider_preference(
+        self,
+        candidates: list[ModelCapability],
+    ) -> list[ModelCapability]:
+        if not self.local_provider_preference or not candidates:
+            return candidates
+
+        if not all(model.provider in LOCAL_PROVIDERS for model in candidates):
+            return candidates
+
+        filtered = [
+            model
+            for model in candidates
+            if model.provider == self.local_provider_preference
+        ]
+        if filtered:
+            return filtered
+
+        if self.verbose:
+            logger.warning(
+                "Preferred local provider '%s' not available; falling back to other local candidates.",
+                self.local_provider_preference,
+            )
+        return candidates
 
     def _setup_logging(self) -> None:
         level = logging.DEBUG if self.verbose else logging.INFO
@@ -2651,6 +2719,8 @@ class AIOrchestrator:
         if not candidates:
             return None
 
+        candidates = self._apply_local_provider_preference(candidates)
+
         # Score candidates using provider characteristics
         scored = []
         for model in candidates:
@@ -2713,7 +2783,7 @@ class AIOrchestrator:
 
             # 5. Prefer local models when privacy keywords detected
             if TaskType.LOCAL_MODEL in all_tasks:
-                if model.provider in {"ollama", "mlx"}:
+                if model.provider in LOCAL_PROVIDERS:
                     score += 5.0  # Significant bonus for local/private
 
             # 6. User Priority Bonus
@@ -2982,9 +3052,19 @@ async def main() -> None:
     parser.add_argument("prompt", nargs="?", help="The prompt to send")
     parser.add_argument("--model", "-m", help="Override model selection")
     parser.add_argument(
-        "--local", "-l", action="store_true", help="Prefer local models"
+        "--local",
+        "-l",
+        action="store_true",
+        default=None,
+        help="Prefer local models",
     )
-    parser.add_argument("--cheap", "-c", action="store_true", help="Optimize for cost")
+    parser.add_argument(
+        "--cheap",
+        "-c",
+        action="store_true",
+        default=None,
+        help="Optimize for cost",
+    )
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     parser.add_argument("--configure", action="store_true", help="Configure API keys")
     parser.add_argument(

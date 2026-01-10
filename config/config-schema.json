@@ -16,8 +16,14 @@
       "properties": {
         "preferLocal": {
           "type": "boolean",
-          "description": "Prefer local models (Ollama) for privacy",
+          "description": "Prefer local models (Ollama or MLX) for privacy",
           "default": false
+        },
+        "localProvider": {
+          "type": "string",
+          "description": "Preferred local inference provider when local routing is enabled",
+          "enum": ["any", "mlx", "ollama"],
+          "default": "any"
         },
         "costOptimize": {
           "type": "boolean",

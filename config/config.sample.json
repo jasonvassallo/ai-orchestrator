@@ -6,6 +6,7 @@
   
   "defaults": {
     "preferLocal": false,
+    "localProvider": "mlx",
     "costOptimize": false,
     "maxTokens": 4096,
     "temperature": 0.7,
@@ -33,11 +34,7 @@
       "enabled": true,
       "priority": 70
     },
-    "llama3.2": {
-      "enabled": true,
-      "priority": 50
-    },
-    "deepseek-coder-v2": {
+    "mlx-llama8": {
       "enabled": true,
       "priority": 60
     }
@@ -100,7 +97,7 @@
     "reasoning": ["o1", "claude-opus-4.5"],
     "creative": ["claude-opus-4.5", "gpt-4o"],
     "summarization": ["claude-haiku-4.5", "gpt-4o-mini"],
-    "local": ["llama3.2", "deepseek-coder-v2"],
+    "local": ["mlx-llama8"],
     "long-context": ["gemini-1.5-pro", "claude-opus-4.5"]
   }
 }
