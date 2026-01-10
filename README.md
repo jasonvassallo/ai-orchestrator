@@ -19,7 +19,7 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 - **Vertex AI Resilience**: Structured retryable 429/resource-exhausted handling with clearer error messages
 - **Security Hardened**: Input validation, audit logging, no credential leakage
 - **VS Code Extension**: Full-featured extension with keyboard shortcuts
-- **Local Models**: Privacy-first option with Ollama support
+- **Local Models**: Privacy-first option with Ollama or MLX
 - **Cost Optimization**: Route to cheaper models when appropriate
 - **Web Search**: Perplexity integration for real-time information
 - **Image Generation**: DALL-E integration for creating images
@@ -400,6 +400,7 @@ Copy `config/config.sample.json` to `~/.ai_orchestrator/config.json`:
   "version": "2.0.0",
   "defaults": {
     "preferLocal": false,
+    "localProvider": "mlx",
     "costOptimize": false,
     "maxTokens": 4096,
     "temperature": 0.7
@@ -408,10 +409,14 @@ Copy `config/config.sample.json` to `~/.ai_orchestrator/config.json`:
     "code": ["claude-sonnet-4.5", "codestral", "deepseek-chat"],
     "reasoning": ["o1", "claude-opus-4.5", "deepseek-reasoner"],
     "websearch": ["perplexity-sonar-pro", "perplexity-sonar"],
-    "local": ["llama3.2", "deepseek-coder-v2"]
+    "local": ["mlx-llama8"]
   }
 }
 ```
+
+To force MLX for local routing, set `defaults.preferLocal` to `true`, keep
+`defaults.localProvider` as `mlx`, and point `taskRouting.local` at
+`mlx-llama8`.
 
 To override the Vertex AI location (defaults to `global`), add:
 
