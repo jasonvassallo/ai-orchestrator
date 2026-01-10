@@ -206,3 +206,7 @@ All provider calls are async using `asyncio` and `httpx`.
 For additional context, refer to:
 - `CLAUDE.md`: Context specific to Anthropic's Claude.
 - `AGENTS.md`: General context for generic AI agents.
+
+## Gemini Added Memories
+- Always update GEMINI.md with any code changes or documentation updates, and remind the user to commit files at appropriate times.
+- Current date context: January 2026.
