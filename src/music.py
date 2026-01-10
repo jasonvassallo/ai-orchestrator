@@ -240,6 +240,15 @@ def get_output_dir() -> Path:
     return output_dir
 
 
+def _find_project_root() -> Path | None:
+    """Find the project root by looking for pyproject.toml or .git."""
+    p = Path(__file__).resolve()
+    for parent in [p] + list(p.parents):
+        if (parent / "pyproject.toml").exists() or (parent / ".git").exists():
+            return parent
+    return None
+
+
 def get_scale_notes(root: str, scale: str, octave: int = 4) -> list[int]:
     """Get MIDI note numbers for a scale starting at the given root."""
     root_idx = NOTES.index(root) if root in NOTES else 0
@@ -513,7 +522,98 @@ def create_combined_midi(params: MusicParameters, filename_base: str) -> str:
 async def generate_audio_with_musicgen(
     params: MusicParameters, filename_base: str
 ) -> str | None:
-    """Generate audio using MusicGen (requires torch + transformers)."""
+    """Generate audio using MusicGen in a dedicated venv if available.
+
+    Order:
+      1) External venv runner (.music-venv) calling scripts/musicgen_generate.py
+      2) Audiocraft (best in-process fallback)
+      3) Transformers (in-process fallback)
+    """
+    # 0) Try dedicated audio venv runner
+    try:
+        project_root = _find_project_root()
+        if project_root:
+            venv = os.environ.get("MUSICGEN_VENV") or str(project_root / ".music-venv")
+            py = Path(venv) / (
+                "Scripts/python.exe" if os.name == "nt" else "bin/python"
+            )
+            script = project_root / "scripts" / "musicgen_generate.py"
+            if py.exists() and script.exists():
+                prompt_parts = []
+                if params.prompt:
+                    prompt_parts.append(params.prompt)
+                prompt_parts.append(f"{params.bpm} BPM")
+                prompt_parts.append(f"{params.key} {params.scale}")
+                genre_descriptions = {
+                    "tech_house_90s": "90s tech house, funky beats, underground electronic",
+                    "funky_90s": "funky house, groovy bassline, 90s electronic",
+                    "progressive_house": "progressive house, atmospheric, building",
+                    "deep_house": "deep house, soulful, smooth",
+                    "minimal": "minimal techno, hypnotic, stripped back",
+                }
+                prompt_parts.append(
+                    genre_descriptions.get(params.genre, "electronic dance music")
+                )
+                prompt = ", ".join(prompt_parts)
+
+                output_path = get_output_dir() / f"{filename_base}_audio.wav"
+
+                import subprocess
+
+                cmd = [
+                    str(py),
+                    str(script),
+                    "--prompt",
+                    prompt,
+                    "--duration",
+                    str(max(1, min(params.duration, 30))),
+                    "--output",
+                    str(output_path),
+                ]
+                res = subprocess.run(cmd, capture_output=True, text=True)
+                if res.returncode == 0:
+                    path_str = res.stdout.strip().splitlines()[-1]
+                    if Path(path_str).exists():
+                        return path_str
+    except Exception:
+        pass
+    # 1) Try Audiocraft (preferred)
+    try:
+        import numpy as np
+        import scipy.io.wavfile as wav
+        from audiocraft.models import MusicGen
+
+        prompt_parts = []
+        if params.prompt:
+            prompt_parts.append(params.prompt)
+        prompt_parts.append(f"{params.bpm} BPM")
+        prompt_parts.append(f"{params.key} {params.scale}")
+        genre_descriptions = {
+            "tech_house_90s": "90s tech house, funky beats, underground electronic",
+            "funky_90s": "funky house, groovy bassline, 90s electronic",
+            "progressive_house": "progressive house, atmospheric, building",
+            "deep_house": "deep house, soulful, smooth",
+            "minimal": "minimal techno, hypnotic, stripped back",
+        }
+        prompt_parts.append(
+            genre_descriptions.get(params.genre, "electronic dance music")
+        )
+        prompt = ", ".join(prompt_parts)
+
+        model = MusicGen.get_pretrained("facebook/musicgen-small")
+        model.set_generation_params(duration=max(1, min(params.duration, 30)))
+        wavs = model.generate([prompt])  # List[Tensor] with shape [1, T]
+        audio = wavs[0].cpu().numpy().squeeze()
+        sampling_rate = 32000  # MusicGen small default sample rate
+        # Normalize to int16
+        audio_int16 = np.int16(np.clip(audio, -1.0, 1.0) * 32767)
+        output_path = get_output_dir() / f"{filename_base}_audio.wav"
+        wav.write(str(output_path), rate=sampling_rate, data=audio_int16)
+        return str(output_path)
+    except Exception:
+        pass
+
+    # 2) Fallback to Transformers (when compatible)
     try:
         import scipy.io.wavfile as wav
         from transformers import AutoProcessor, MusicgenForConditionalGeneration

@@ -14,11 +14,11 @@ anthropic>=0.18.0
 # Use the new official Google SDK (matches code in src/orchestrator.py)
 google-genai>=1.0.0
 mlx>=0.6.0
-mlx-lm>=0.14.0
-huggingface-hub>=0.20.0
+mlx-lm==0.14.0
+huggingface-hub>=0.34.0,<1.0
 # Optional: faster Hugging Face downloads used by src/manage_models.py
 hf-transfer>=0.1.9
-transformers>=4.45.0
+transformers>=4.45.0,<5.0
 accelerate>=0.26.0
 scipy>=1.11.0
 torch>=2.0.0

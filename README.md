@@ -395,11 +395,11 @@ Generated files are saved to `~/Music/AI Orchestrator/` and can be opened in:
 pip install midiutil
 
 # For AI audio generation (optional)
-pip install torch "transformers>=4.45.0" scipy
-## Optional speedups
-pip install accelerate
+# Recommended in a separate venv; see MUSICGEN.md
+pip install torch "transformers>=4.45,<5.0" scipy accelerate
 
-If you see a MusicGen error like `MusicgenDecoderConfig has no attribute 'decoder'`, upgrade Transformers to 4.45+.
+If you see a MusicGen error like `MusicgenDecoderConfig has no attribute 'decoder'`,
+see MUSICGEN.md for compatible version combos and dedicated venv setup.
 
 ### MLX Smart Cache Tips
 
