@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+from typing import Any
 
 # Check for macOS
 if sys.platform != "darwin":
@@ -34,13 +35,13 @@ except ImportError:
 class AIMenuBarApp(rumps.App):
     """Menu bar application for AI Orchestrator."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(
             "AI",
             icon=None,  # Use text instead of icon
             quit_button=None,  # We'll add our own
         )
-        self.orchestrator = None
+        self.orchestrator: Any = None
         self._init_orchestrator()
         self._build_menu()
 
@@ -69,23 +70,24 @@ class AIMenuBarApp(rumps.App):
                     ),
                     None,
                     rumps.MenuItem(
+                        "GPT-5 (Preview)",
+                        callback=lambda _: self.set_model("gpt-5-preview"),
+                    ),
+                    rumps.MenuItem(
                         "Claude Opus 4.5",
                         callback=lambda _: self.set_model("claude-opus-4.5"),
                     ),
                     rumps.MenuItem(
-                        "Claude Sonnet 4.5",
-                        callback=lambda _: self.set_model("claude-sonnet-4.5"),
+                        "Gemini 3.0 Pro",
+                        callback=lambda _: self.set_model("gemini-3-pro"),
                     ),
                     rumps.MenuItem(
-                        "GPT-4o", callback=lambda _: self.set_model("gpt-4o")
+                        "MLX Llama 8B (Local)",
+                        callback=lambda _: self.set_model("mlx-llama8"),
                     ),
                     rumps.MenuItem(
-                        "Gemini 2.0 Flash",
-                        callback=lambda _: self.set_model("gemini-2.0-flash"),
-                    ),
-                    rumps.MenuItem(
-                        "Llama 3.2 (Local)",
-                        callback=lambda _: self.set_model("llama3.2"),
+                        "MLX Qwen 3 32B (Local)",
+                        callback=lambda _: self.set_model("mlx-qwen-3-32b"),
                     ),
                 ],
             ),
@@ -98,7 +100,7 @@ class AIMenuBarApp(rumps.App):
             rumps.MenuItem("Quit", callback=rumps.quit_application),
         ]
 
-        self.selected_model = None
+        self.selected_model: str | None = None
 
     def set_model(self, model: str | None) -> None:
         """Set the selected model."""
@@ -111,7 +113,7 @@ class AIMenuBarApp(rumps.App):
         )
 
     @rumps.clicked("Quick Query...")
-    def quick_query(self, _) -> None:
+    def quick_query(self, _: Any) -> None:
         """Show quick query dialog."""
         # Create a simple input window
         response = rumps.Window(
@@ -130,7 +132,7 @@ class AIMenuBarApp(rumps.App):
     def _run_query(self, query: str) -> None:
         """Run a query in a background thread."""
 
-        def run_async():
+        def run_async() -> None:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
@@ -164,7 +166,7 @@ class AIMenuBarApp(rumps.App):
         thread.start()
 
     @rumps.clicked("Open GUI App")
-    def open_gui(self, _) -> None:
+    def open_gui(self, _: Any) -> None:
         """Open the GUI application."""
         import subprocess
 
@@ -179,7 +181,7 @@ class AIMenuBarApp(rumps.App):
             rumps.alert(title="Error", message=f"Could not open GUI: {e}")
 
     @rumps.clicked("Open Terminal UI")
-    def open_tui(self, _) -> None:
+    def open_tui(self, _: Any) -> None:
         """Open the terminal UI in a new Terminal window."""
         import subprocess
 
@@ -196,7 +198,7 @@ class AIMenuBarApp(rumps.App):
             rumps.alert(title="Error", message=f"Could not open TUI: {e}")
 
     @rumps.clicked("Configure API Keys")
-    def configure_keys(self, _) -> None:
+    def configure_keys(self, _: Any) -> None:
         """Open terminal to configure API keys."""
         import subprocess
 

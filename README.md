@@ -248,7 +248,12 @@ python setup_app.py py2app
 | `vertex-gemini-3-flash` | Enterprise, speed | 1M | Fast enterprise inference |
 | `vertex-gemini-2.5-flash` | Enterprise, speed | 1M | Fast enterprise inference |
 
-> **Note:** Vertex AI uses Google Cloud ADC instead of API keys. See [Configure Credentials](#configure-credentials-required) for setup.
+> Note:
+> - Vertex AI uses Google Cloud ADC instead of API keys. See [Configure Credentials](#configure-credentials-required).
+> - The orchestrator now prefers Vertex for the Gemini 3 Preview models by default:
+>   - gemini-3-pro → vertex-gemini-3-pro
+>   - gemini-3-flash → vertex-gemini-3-flash
+>   This provides higher limits using your Vertex subscription. You can still explicitly select the Google Gemini endpoints if desired.
 
 ### Mistral
 
@@ -294,6 +299,8 @@ python setup_app.py py2app
 | `codellama` | Ollama | Private coding | Free, code-focused |
 | `deepseek-coder-v2` | Ollama | Complex code | Excellent coding, free |
 | `mlx-llama8` | MLX | Apple Silicon | Free, fast on M1/M2/M3/M4, private |
+| `mlx-qwen-3-32b` | MLX | Apple Silicon, Vision | High quality, local, private |
+| `mlx-qwen-coder-14b` | MLX | Apple Silicon, Coding | Code-focused, local, private |
 
 ## API Keys Required
 
@@ -388,7 +395,33 @@ Generated files are saved to `~/Music/AI Orchestrator/` and can be opened in:
 pip install midiutil
 
 # For AI audio generation (optional)
-pip install torch transformers scipy
+pip install torch "transformers>=4.45.0" scipy
+## Optional speedups
+pip install accelerate
+
+If you see a MusicGen error like `MusicgenDecoderConfig has no attribute 'decoder'`, upgrade Transformers to 4.45+.
+
+### MLX Smart Cache Tips
+
+- To keep a single consistent cache location, set:
+
+```bash
+export HF_HOME="$HOME/Library/Caches/huggingface"
+```
+
+- The orchestrator automatically scans both `~/.cache/huggingface/hub` and
+  `~/Library/Caches/huggingface/hub` (and respects `HF_HOME`) for MLX snapshots
+  that include `*.safetensors` shards. If found, it enables offline mode to prevent network usage.
+
+### Using the Project Virtual Environment
+
+Always prefer the project venv for running and testing:
+
+```bash
+./.venv/bin/python -m src.orchestrator "Hello"
+```
+
+This ensures consistent dependencies (e.g., MLX, Transformers) and avoids mixing with user-level Python.
 ```
 
 ## Configuration

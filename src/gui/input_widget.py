@@ -257,10 +257,12 @@ class MusicGenerationDialog(QDialog):
     def get_parameters(self) -> dict:
         """Get the music generation parameters."""
         bpm = self.bpm_edit.text().strip()
-        try:
-            bpm = int(bpm) if bpm else None
-        except ValueError:
-            bpm = None
+        bpm_val: int | None = None
+        if bpm:
+            try:
+                bpm_val = int(bpm)
+            except ValueError:
+                pass
 
         duration_text = self.duration_combo.currentText()
         duration = int(duration_text.split()[0])
@@ -278,7 +280,7 @@ class MusicGenerationDialog(QDialog):
             if self.mood_combo.currentText() != "Auto"
             else None,
             "energy": self.energy_slider.value() / 100.0,
-            "bpm": bpm,
+            "bpm": bpm_val,
             "duration": duration,
             "format": self.format_combo.currentText().lower(),
         }
@@ -294,17 +296,17 @@ class InputWidget(QFrame):
         ("Auto (Best for Task)", None),
         ("Claude Opus 4.5", "claude-opus-4.5"),
         ("Claude Sonnet 4.5", "claude-sonnet-4.5"),
-        ("Claude Haiku 4.5", "claude-haiku-4.5"),
+        ("GPT-5 (Preview)", "gpt-5-preview"),
+        ("GPT-4.5 (Preview)", "gpt-4.5-preview"),
         ("GPT-4o", "gpt-4o"),
-        ("GPT-4o Mini", "gpt-4o-mini"),
         ("o1 (Reasoning)", "o1"),
+        ("Gemini 3.0 Pro (Preview)", "gemini-3-pro"),
+        ("Gemini 3.0 Flash (Preview)", "gemini-3-flash"),
         ("Gemini 2.0 Flash", "gemini-2.0-flash"),
-        ("Gemini 1.5 Pro", "gemini-1.5-pro"),
         ("DeepSeek Chat", "deepseek-chat"),
-        ("DeepSeek Reasoner", "deepseek-reasoner"),
-        ("Grok 2", "grok-2"),
-        ("Llama 3.3 70B (Groq)", "llama-3.3-70b"),
-        ("Llama 3.2 (Local)", "llama3.2"),
+        ("MLX Llama 3.1 8B (Local)", "mlx-llama8"),
+        ("MLX Qwen 3 32B (Local)", "mlx-qwen-3-32b"),
+        ("MLX Qwen Coder 14B (Local)", "mlx-qwen-coder-14b"),
     ]
 
     def __init__(self, parent: QWidget | None = None):

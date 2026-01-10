@@ -159,14 +159,14 @@ class TestModelRegistry:
         """Should resolve a registry entry from a provider model id"""
         model = ModelRegistry.get_model("gemini-3-flash-preview")
         assert model is not None
-        assert model.provider == "google"
+        assert model.provider == "vertex-ai"
         assert model.model_id == "gemini-3-flash-preview"
 
-    def test_model_id_resolution_prefers_google_over_vertex(self):
-        """If multiple models share an id, prefer the non-Vertex entry"""
+    def test_model_id_resolution_prefers_vertex_over_google(self):
+        """If multiple models share an id, prefer the Vertex entry for Gemini 3 Preview models"""
         model = ModelRegistry.get_model("gemini-3-pro-preview")
         assert model is not None
-        assert model.provider == "google"
+        assert model.provider == "vertex-ai"
 
     def test_get_models_for_task(self):
         """Should return suitable models for task type"""

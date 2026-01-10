@@ -6,6 +6,10 @@ This file provides context and guidance for Google's Gemini models when working 
 
 **AI Orchestrator** is an intelligent multi-model AI router written in Python. It automatically routes user queries to the best AI model based on task classification (e.g., coding, reasoning, creative writing). It supports **11 providers** (OpenAI, Anthropic, Google, Vertex AI, Mistral, Groq, xAI, Perplexity, DeepSeek, Ollama, MLX) with 25+ models, featuring secure credential management and multiple UI options.
 
+Vertex preference for Gemini 3 Preview:
+- The orchestrator maps `gemini-3-pro` → `vertex-gemini-3-pro` and `gemini-3-flash` → `vertex-gemini-3-flash` by default, leveraging Vertex AI limits when you have ADC configured.
+- You can still explicitly call Google endpoints (`gemini-3-pro-preview`, `gemini-3-flash-preview`) if needed.
+
 ## Common Commands
 
 ### Setup & Installation
@@ -26,6 +30,14 @@ pip install -e ".[dev]"
 ```
 
 > **Note:** Always ensure your virtual environment is activated (`source .venv/bin/activate`) before running commands, or use the direct path (e.g., `./.venv/bin/python`, `./.venv/bin/ruff`).
+
+> **Vertex Credentials:** Vertex AI uses Google Application Default Credentials, not a `GEMINI_API_KEY`. Run:
+>
+> ```bash
+> gcloud auth application-default login
+> export GOOGLE_CLOUD_PROJECT="your-gcp-project"
+> export GOOGLE_CLOUD_LOCATION="global"
+> ```
 
 ### Running Applications
 
@@ -53,6 +65,15 @@ python -m src.manage_models --yes --no-clean  # Skip cache cleanup
 
 # Configure credentials
 python -m src.credentials  # or: ai-configure
+
+### MLX Cache Consistency
+
+To avoid redundant downloads and ensure MLX loads fully offline, set a single cache home:
+
+```bash
+export HF_HOME="$HOME/Library/Caches/huggingface"
+```
+The orchestrator searches both `~/.cache/huggingface/hub` and `~/Library/Caches/huggingface/hub` (and respects `HF_HOME`) and enables offline mode when `*.safetensors` are present.
 ```
 
 ### Testing & Quality

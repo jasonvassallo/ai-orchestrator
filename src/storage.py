@@ -208,8 +208,13 @@ class ConversationStorage:
     def list_conversations(self, limit: int = 100) -> list[Conversation]:
         """List all conversations, most recent first."""
         with self._get_connection() as conn:
+            # Optimize: Select explicit columns and skip loading settings JSON
             cursor = conn.execute(
-                "SELECT * FROM conversations ORDER BY updated_at DESC LIMIT ?",
+                """
+                SELECT id, title, created_at, updated_at, model, NULL as settings
+                FROM conversations
+                ORDER BY updated_at DESC LIMIT ?
+                """,
                 (limit,),
             )
             return [Conversation.from_row(row) for row in cursor.fetchall()]

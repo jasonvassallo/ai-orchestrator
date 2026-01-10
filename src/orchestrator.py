@@ -42,7 +42,10 @@ from .credentials import CONFIG_DIR, get_api_key
 
 # Configure logging with security in mind (no sensitive data in logs)
 logger = logging.getLogger(__name__)
-LOCAL_PROVIDERS = {"ollama", "mlx"}
+LOCAL_PROVIDERS = {
+    "ollama",
+    "mlx",
+}
 
 
 def format_http_error(exc: httpx.HTTPStatusError) -> str:
@@ -565,12 +568,23 @@ class GoogleProvider(BaseProvider):
             await self.rate_limiter.check_and_wait(self.provider_name, 1000)
 
             # Convert messages to Gemini format
-            prompt = "\n".join(f"{msg['role']}: {msg['content']}" for msg in messages)
+            contents = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    contents.append(
+                        {
+                            "role": "user",
+                            "parts": [{"text": f"System: {msg['content']}"}],
+                        }
+                    )
+                else:
+                    role = "user" if msg["role"] == "user" else "model"
+                    contents.append({"role": role, "parts": [{"text": msg["content"]}]})
 
             # Use native async API
             response = await self._client.aio.models.generate_content(
                 model=model,
-                contents=prompt,
+                contents=contents,
             )
 
             latency = (time.time() - start_time) * 1000
@@ -1358,23 +1372,97 @@ class MLXProvider(BaseProvider):
             import os
 
             import mlx.core as mx
-            from huggingface_hub import try_to_load_from_cache
+            from huggingface_hub import snapshot_download, try_to_load_from_cache
             from mlx_lm import load
+            from pathlib import Path
 
-            # Smart Cache Detection
-            # Check if the model's config is already in the Hugging Face cache
-            cached_config = try_to_load_from_cache(
-                repo_id=self.model_path, filename="config.json"
-            )
+            def _find_local_snapshot_dir(repo_id: str) -> str | None:
+                """Search common HF cache roots for a snapshot dir with safetensors."""
+                owner_repo = repo_id.replace("/", "--")
+                model_folder = f"models--{owner_repo}"
 
-            if cached_config:
-                logger.info(f"Model found in cache: {cached_config}")
-                logger.info("Enabling OFFLINE mode for MLX to prevent network checks.")
+                candidates: list[Path] = []
+                # Respect HF_HOME if set
+                hf_home = os.environ.get("HF_HOME")
+                if hf_home:
+                    candidates.append(Path(hf_home) / "hub")
+
+                # macOS default
+                candidates.append(
+                    Path.home() / "Library" / "Caches" / "huggingface" / "hub"
+                )
+                # Unix default
+                candidates.append(Path.home() / ".cache" / "huggingface" / "hub")
+
+                for hub_root in candidates:
+                    model_root = hub_root / model_folder / "snapshots"
+                    if not model_root.exists():
+                        continue
+                    # Check newest snapshots first
+                    snapshots = sorted(
+                        [p for p in model_root.iterdir() if p.is_dir()],
+                        key=lambda p: p.stat().st_mtime,
+                        reverse=True,
+                    )
+                    for snap in snapshots:
+                        shards = list(snap.glob("*.safetensors"))
+                        if shards:
+                            return str(snap)
+                return None
+
+            # Smart Cache Detection (robust)
+            # 1) Try to locate an existing local snapshot with weights across all known caches
+            local_snapshot = _find_local_snapshot_dir(self.model_path)
+            if local_snapshot:
+                logger.info(f"Using local snapshot: {local_snapshot}")
                 os.environ["HF_HUB_OFFLINE"] = "1"
+                self.model_path = local_snapshot
             else:
-                logger.info(f"Model {self.model_path} not found in cache.")
-                logger.info("Enabling ONLINE mode to download model (approx 5GB).")
-                os.environ["HF_HUB_OFFLINE"] = "0"
+                # 2) Try a strict local-only snapshot resolution via huggingface_hub
+                try:
+                    snap_dir = snapshot_download(
+                        repo_id=self.model_path,
+                        local_files_only=True,
+                        allow_patterns=["*.safetensors", "*.json", "tokenizer*"],
+                    )
+                    shards = list(Path(snap_dir).glob("*.safetensors"))
+                    if shards:
+                        logger.info(
+                            f"Model found locally via snapshot_download: {snap_dir}"
+                        )
+                        os.environ["HF_HUB_OFFLINE"] = "1"
+                        self.model_path = snap_dir
+                    else:
+                        logger.info(
+                            "Local snapshot found but no weights; ONLINE mode enabled to fetch shards."
+                        )
+                        os.environ["HF_HUB_OFFLINE"] = "0"
+                        # Keep model_path as repo id so mlx-lm can download
+                except Exception:
+                    # 3) Fallback to try_to_load_from_cache for config + check shards presence in that snapshot
+                    try:
+                        cached_config = try_to_load_from_cache(
+                            repo_id=self.model_path, filename="config.json"
+                        )
+                    except Exception:
+                        cached_config = None
+                    if cached_config:
+                        cache_dir = Path(cached_config).parent
+                        shards = list(cache_dir.glob("*.safetensors"))
+                        if shards:
+                            logger.info(f"Model found in cache: {cached_config}")
+                            os.environ["HF_HUB_OFFLINE"] = "1"
+                            self.model_path = str(cache_dir)
+                        else:
+                            logger.info(
+                                "Model index found but weights are missing; enabling ONLINE mode to fetch shards."
+                            )
+                            os.environ["HF_HUB_OFFLINE"] = "0"
+                    else:
+                        logger.info(
+                            f"Model {self.model_path} not found locally; ONLINE mode enabled."
+                        )
+                        os.environ["HF_HUB_OFFLINE"] = "0"
 
             # Check if we have a GPU available (Metal)
             if not mx.metal.is_available():
@@ -1382,8 +1470,13 @@ class MLXProvider(BaseProvider):
                 # We can still run on CPU, but it will be slower
 
             logger.info(f"Loading MLX model: {self.model_path}")
-            # Load returns model, tokenizer, and optionally config (ignore extra)
-            result = load(self.model_path)
+
+            # Run load in a thread to avoid blocking the event loop (GUI freeze fix)
+            def _load_model() -> Any:
+                return load(self.model_path)
+
+            result = await asyncio.to_thread(_load_model)
+
             if isinstance(result, tuple) and len(result) >= 2:
                 self._model = result[0]
                 self._tokenizer = result[1]
@@ -1947,6 +2040,31 @@ class ModelRegistry:
             strengths=("cost-effective", "fast", "good for simple tasks"),
             supports_functions=True,
         ),
+        # GPT-5 Preview / Placeholder (mapped to o1-preview or latest available)
+        "gpt-5-preview": ModelCapability(
+            name="GPT-5 (Preview)",
+            provider="openai",
+            model_id="o1",  # Mapping to o1 as closest to "next-gen" currently available
+            task_types=(
+                TaskType.DEEP_REASONING,
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+            ),
+            context_window=200000,
+            cost_per_1k_input=0.015,
+            cost_per_1k_output=0.06,
+            strengths=("next-gen reasoning", "complex tasks", "preview capability"),
+        ),
+        "gpt-4.5-preview": ModelCapability(
+            name="GPT-4.5 (Preview)",
+            provider="openai",
+            model_id="gpt-4o",  # Mapping to 4o as placeholder
+            task_types=(TaskType.GENERAL_NLP, TaskType.CODE_GENERATION),
+            context_window=128000,
+            cost_per_1k_input=0.01,
+            cost_per_1k_output=0.03,
+            strengths=("advanced capability", "preview"),
+        ),
         "o1": ModelCapability(
             name="o1",
             provider="openai",
@@ -2368,10 +2486,45 @@ class ModelRegistry:
             max_output_tokens=4096,
             supports_streaming=True,
         ),
+        "mlx-qwen-3-32b": ModelCapability(
+            name="MLX Qwen 3 32B (Vision)",
+            provider="mlx",
+            model_id="mlx-community/Qwen3-VL-32B-Instruct-4bit",
+            task_types=(
+                TaskType.MULTIMODAL,
+                TaskType.LOCAL_MODEL,
+                TaskType.GENERAL_NLP,
+            ),
+            context_window=8192,
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            strengths=("vision", "local", "private", "high quality"),
+            supports_vision=True,
+            supports_streaming=True,
+        ),
+        "mlx-qwen-coder-14b": ModelCapability(
+            name="MLX Qwen Coder 14B",
+            provider="mlx",
+            model_id="mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+            task_types=(TaskType.CODE_GENERATION, TaskType.LOCAL_MODEL),
+            context_window=32768,
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            strengths=("coding", "local", "private", "fast"),
+            supports_streaming=True,
+        ),
     }
 
     @classmethod
     def get_model(cls, model_key: str) -> ModelCapability | None:
+        # Map certain Google Gemini registry keys to Vertex variants by default
+        vertex_alias_map = {
+            "gemini-3-pro": "vertex-gemini-3-pro",
+            "gemini-3-flash": "vertex-gemini-3-flash",
+        }
+        if model_key in vertex_alias_map and vertex_alias_map[model_key] in cls.MODELS:
+            return cls.MODELS[vertex_alias_map[model_key]]
+
         # Allow lookups by either the registry key (recommended) or the
         # underlying provider model id (useful for "preview"/versioned ids).
         model = cls.MODELS.get(model_key)
@@ -2389,8 +2542,21 @@ class ModelRegistry:
         if len(candidates) == 1:
             return candidates[0][1]
 
-        # If multiple registry entries share the same model_id (e.g. Google
-        # Gemini vs Vertex AI endpoints), prefer the non-Vertex variant.
+        # Preference rule: For Gemini 3 Pro/Flash Preview, prefer Vertex AI variants
+        vertex_preferred_ids = {"gemini-3-pro-preview", "gemini-3-flash-preview"}
+        if (
+            model_key in vertex_preferred_ids
+            or candidates[0][1].model_id in vertex_preferred_ids
+        ):
+            vertex = [
+                (key, candidate)
+                for key, candidate in candidates
+                if candidate.provider == "vertex-ai" or key.startswith("vertex-")
+            ]
+            if vertex:
+                return sorted(vertex, key=lambda item: item[0])[0][1]
+
+        # Otherwise, prefer the non-Vertex (Google) entry by default
         non_vertex = [
             (key, candidate)
             for key, candidate in candidates
@@ -2399,6 +2565,7 @@ class ModelRegistry:
         if non_vertex:
             return sorted(non_vertex, key=lambda item: item[0])[0][1]
 
+        # Fallback to first by key order if only Vertex options exist
         return sorted(candidates, key=lambda item: item[0])[0][1]
 
     @classmethod
@@ -2609,6 +2776,16 @@ class AIOrchestrator:
                 provider = PerplexityProvider(self.rate_limiter)
             elif provider_name == "deepseek":
                 provider = DeepSeekProvider(self.rate_limiter)
+            elif provider_name.startswith("mlx-"):
+                # Initialize specific MLX model
+                model_key = provider_name
+                model_def = ModelRegistry.MODELS.get(model_key)
+                if model_def:
+                    provider = MLXProvider(
+                        self.rate_limiter, model_path=model_def.model_id
+                    )
+                else:
+                    logger.error(f"Unknown MLX provider/model: {provider_name}")
             elif provider_name == "mlx":
                 provider = MLXProvider(self.rate_limiter)
             else:
@@ -2802,6 +2979,13 @@ class AIOrchestrator:
                 priority_bonus = (priority - 50) / 10.0
                 score += priority_bonus
 
+            # 7. Prefer Vertex AI for Gemini 3 Pro/Flash Preview
+            if model.model_id in {"gemini-3-pro-preview", "gemini-3-flash-preview"}:
+                if model.provider == "vertex-ai":
+                    score += 1.0
+                elif model.provider == "google":
+                    score -= 0.2
+
             scored.append((model, score))
 
         if not scored:
@@ -2932,7 +3116,19 @@ class AIOrchestrator:
             )
 
         # Get provider for the selected model
-        provider = await self._get_provider(model.provider)
+        # MLX models need a distinct provider instance per model since they load weights locally.
+        provider_key = model.provider
+        if model.provider == "mlx":
+            # Try to resolve the registry key for this model to support per-model MLX providers
+            reg_key: str | None = None
+            for key, reg_model in ModelRegistry.MODELS.items():
+                if reg_model == model:
+                    reg_key = key
+                    break
+            if reg_key and reg_key.startswith("mlx-"):
+                provider_key = reg_key
+
+        provider = await self._get_provider(provider_key)
         if not provider:
             return APIResponse(
                 content="",

@@ -15,6 +15,7 @@ Or after installation:
 from __future__ import annotations
 
 import sys
+from typing import Any
 
 try:
     from textual.app import App, ComposeResult
@@ -41,29 +42,32 @@ except ImportError:
 # Available models
 MODELS = [
     ("Auto (Best for Task)", "auto"),
+    ("GPT-5 (Preview)", "gpt-5-preview"),
     ("Claude Opus 4.5", "claude-opus-4.5"),
     ("Claude Sonnet 4.5", "claude-sonnet-4.5"),
-    ("GPT-4o", "gpt-4o"),
-    ("Gemini 2.0 Flash", "gemini-2.0-flash"),
+    ("Gemini 3.0 Pro", "gemini-3-pro"),
+    ("Gemini 3.0 Flash", "gemini-3-flash"),
     ("DeepSeek Chat", "deepseek-chat"),
-    ("Llama 3.2 (Local)", "llama3.2"),
+    ("MLX Llama 8B (Local)", "mlx-llama8"),
+    ("MLX Qwen 3 32B (Local)", "mlx-qwen-3-32b"),
+    ("MLX Qwen Coder 14B (Local)", "mlx-qwen-coder-14b"),
 ]
 
 
 class MessageWidget(Static):
     """A chat message widget."""
 
-    def __init__(self, role: str, content: str, **kwargs):
+    def __init__(self, role: str, content: str, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.role = role
-        self.content = content
+        self.text_content = content
 
     def compose(self) -> ComposeResult:
         role_label = "You" if self.role == "user" else "Assistant"
         role_style = "bold cyan" if self.role == "user" else "bold green"
 
         yield Static(f"[{role_style}]{role_label}[/]")
-        yield Markdown(self.content)
+        yield Markdown(self.text_content)
 
 
 class ChatScreen(Screen):
@@ -142,7 +146,7 @@ class ChatScreen(Screen):
         Binding("escape", "focus_input", "Focus Input"),
     ]
 
-    def __init__(self, orchestrator=None):
+    def __init__(self, orchestrator: Any = None) -> None:
         super().__init__()
         self.orchestrator = orchestrator
         self.messages: list[tuple[str, str]] = []
@@ -323,9 +327,9 @@ class AIChat(App):
     }
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
-        self.orchestrator = None
+        self.orchestrator: Any = None
 
     def on_mount(self) -> None:
         """Initialize on mount."""

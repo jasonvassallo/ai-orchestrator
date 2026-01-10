@@ -63,12 +63,19 @@ Credentials fall back in this order:
 6. Request execution with retries via `RetryHandler.execute_with_retry()` (retryable APIResponse errors and Vertex AI HTTP failures are surfaced for backoff)
 
 ## Local Model Optimization (Smart Cache)
+For MLX/MusicGen, the orchestrator checks the local Hugging Face cache first across multiple roots:
 
-For MLX/MusicGen, the orchestrator checks the local Hugging Face cache first. If a model is cached locally, it sets `HF_HUB_OFFLINE=1` to avoid network downloads and load from disk; otherwise it stays online and allows on-demand downloads.
+- Respects `HF_HOME` (uses `HF_HOME/hub`)
+- Scans `~/Library/Caches/huggingface/hub` (macOS)
+- Scans `~/.cache/huggingface/hub` (Unix default)
+
+If a snapshot containing `*.safetensors` exists, it sets `HF_HUB_OFFLINE=1` and loads directly from disk. If only an index is present (missing shards), it enables ONLINE mode to allow fetching missing files.
+
+Tip: set `HF_HOME="$HOME/Library/Caches/huggingface"` to keep a single consistent cache on macOS.
 
 ## Model Selection Algorithm
 
-Scoring factors include task match, provider characteristics, avoid-for penalties, cost optimization, context window bonuses, and a local model bonus when `prefer_local` is enabled.
+Scoring factors include task match, provider characteristics, avoid-for penalties, cost optimization, context window bonuses, a local model bonus when `prefer_local` is enabled, and a small bias favoring Vertex AI for Gemini 3 Preview models when available.
 
 ## Async Pattern
 

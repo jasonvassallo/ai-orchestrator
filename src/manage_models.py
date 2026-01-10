@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 LOCAL_MODELS = {
     "MLX Llama 3.1 8B": "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
     "MLX Qwen 3 32B": "mlx-community/Qwen3-VL-32B-Instruct-4bit",
+    "MLX Qwen 2.5 Coder 14B": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
     "MusicGen Small": "facebook/musicgen-small",
 }
 
