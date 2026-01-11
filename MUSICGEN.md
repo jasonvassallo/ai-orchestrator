@@ -2,6 +2,23 @@
 
 This project uses a dedicated virtual environment for MusicGen audio generation to avoid dependency conflicts with MLX and other providers.
 
+## Available Models
+
+MusicGen offers several model variants with different capabilities:
+
+| Model | Parameters | Description |
+|-------|-----------|-------------|
+| `musicgen-small` | 300M | **Recommended.** Fast generation, good quality |
+| `musicgen-medium` | 1.5B | Balanced quality and speed |
+| `musicgen-large` | 3.3B | Highest quality, slower generation |
+| `musicgen-stereo-small` | 300M | Stereo output, fast |
+| `musicgen-stereo-medium` | 1.5B | Stereo output, balanced |
+| `musicgen-stereo-large` | 3.3B | Stereo output, highest quality |
+| `musicgen-melody` | 1.5B | Can condition on a reference melody |
+| `musicgen-melody-large` | 3.3B | Melody-conditioned, highest quality |
+
+**Note:** Larger models require more VRAM and take longer to generate, but produce higher quality audio. The stereo models output stereo audio instead of mono.
+
 ## Why a separate venv?
 
 - MLX / mlx-lm currently prefers specific Transformers/HF Hub versions
@@ -41,7 +58,23 @@ Note: The underlying HF model may change its config over time. If a particular c
 - The CLI/GUI/TUI then list the generated files under `~/Music/AI Orchestrator/`
 - You can override the venv path by setting `MUSICGEN_VENV=/path/to/venv`
 
-## Manual test
+## Selecting a Model
+
+### In the GUI
+
+When generating music via the GUI app, use the **"AI Model"** dropdown in the Music Generation dialog to select which MusicGen model to use.
+
+### Via CLI
+
+```bash
+./.music-venv/bin/python scripts/musicgen_generate.py \
+  --prompt "90s tech house groove, 126 BPM, G minor" \
+  --duration 5 \
+  --output /tmp/musicgen_test.wav \
+  --model facebook/musicgen-medium
+```
+
+### Manual test (default model)
 
 ```bash
 ./.music-venv/bin/python scripts/musicgen_generate.py \

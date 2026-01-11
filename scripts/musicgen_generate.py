@@ -7,7 +7,18 @@ Runs in the dedicated audio venv. Usage:
   python scripts/musicgen_generate.py \
     --prompt "90s tech house groove, 126 BPM, G minor" \
     --duration 5 \
-    --output /path/to/out.wav
+    --output /path/to/out.wav \
+    --model facebook/musicgen-small
+
+Available models (all from Hugging Face):
+  - facebook/musicgen-small       (300M params, fast)
+  - facebook/musicgen-medium      (1.5B params, balanced)
+  - facebook/musicgen-large       (3.3B params, high quality)
+  - facebook/musicgen-stereo-small   (stereo output)
+  - facebook/musicgen-stereo-medium  (stereo output)
+  - facebook/musicgen-stereo-large   (stereo output)
+  - facebook/musicgen-melody      (melody-conditioned)
+  - facebook/musicgen-melody-large   (melody-conditioned)
 
 Requires: transformers>=4.45,<5.0, huggingface-hub>=0.34,<1.0, scipy>=1.11, torch
 """
@@ -24,34 +35,31 @@ from transformers import pipeline
 
 
 def main() -> int:
-    tried = []
-    p = argparse.ArgumentParser()
-    p.add_argument("--prompt", required=True)
-    p.add_argument("--duration", type=int, default=5)
-    p.add_argument("--output", required=True)
-    p.add_argument("--model", default="facebook/musicgen-small")
+    p = argparse.ArgumentParser(
+        description="Generate audio using MusicGen models",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--prompt", required=True, help="Text prompt describing the music")
+    p.add_argument("--duration", type=int, default=5, help="Duration in seconds (max 30)")
+    p.add_argument("--output", required=True, help="Output WAV file path")
+    p.add_argument(
+        "--model",
+        default="facebook/musicgen-small",
+        help="Hugging Face model ID (default: facebook/musicgen-small)",
+    )
     args = p.parse_args()
 
-    # Use text-to-audio pipeline with MusicGen
-    last_err: Exception | None = None
-    for model_id in [
-        args.model,
-        "facebook/musicgen-small",
-        "facebook/musicgen-stereo-small",
-    ]:
-        try:
-            pipe = pipeline("text-to-audio", model=model_id, trust_remote_code=True)
-            tried.append(model_id)
-            break
-        except Exception as e:
-            last_err = e
-            continue
-    else:
-        # Fallback to audiocraft if available
+    model_id = args.model
+
+    # Try text-to-audio pipeline with selected model
+    try:
+        pipe = pipeline("text-to-audio", model=model_id, trust_remote_code=True)
+    except Exception as pipeline_err:
+        # Fallback to audiocraft if transformers pipeline fails
         try:
             from audiocraft.models import MusicGen as _AG
 
-            gen = _AG.get_pretrained("facebook/musicgen-small")
+            gen = _AG.get_pretrained(model_id)
             gen.set_generation_params(duration=max(1, min(args.duration, 30)))
             wavs = gen.generate([args.prompt])
             audio = wavs[0].cpu().numpy().squeeze()
@@ -63,7 +71,7 @@ def main() -> int:
             print(str(out_path))
             return 0
         except Exception:
-            print(f"Failed to initialize MusicGen pipeline: {last_err}")
+            print(f"Failed to initialize MusicGen with model {model_id}: {pipeline_err}", file=sys.stderr)
             return 2
 
     max_tokens = max(50, min(args.duration * 50, 1500))

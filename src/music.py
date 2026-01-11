@@ -166,6 +166,69 @@ DRUM_NOTES = {
 }
 
 
+# Available MusicGen models (from Hugging Face)
+MUSICGEN_MODELS = {
+    "musicgen-small": {
+        "id": "facebook/musicgen-small",
+        "description": "Fast, 300M params (recommended for quick generation)",
+        "stereo": False,
+        "melody": False,
+    },
+    "musicgen-medium": {
+        "id": "facebook/musicgen-medium",
+        "description": "Balanced, 1.5B params",
+        "stereo": False,
+        "melody": False,
+    },
+    "musicgen-large": {
+        "id": "facebook/musicgen-large",
+        "description": "High quality, 3.3B params (slower)",
+        "stereo": False,
+        "melody": False,
+    },
+    "musicgen-stereo-small": {
+        "id": "facebook/musicgen-stereo-small",
+        "description": "Stereo output, 300M params",
+        "stereo": True,
+        "melody": False,
+    },
+    "musicgen-stereo-medium": {
+        "id": "facebook/musicgen-stereo-medium",
+        "description": "Stereo output, 1.5B params",
+        "stereo": True,
+        "melody": False,
+    },
+    "musicgen-stereo-large": {
+        "id": "facebook/musicgen-stereo-large",
+        "description": "Stereo output, 3.3B params",
+        "stereo": True,
+        "melody": False,
+    },
+    "musicgen-melody": {
+        "id": "facebook/musicgen-melody",
+        "description": "Melody-conditioned, 1.5B params",
+        "stereo": False,
+        "melody": True,
+    },
+    "musicgen-melody-large": {
+        "id": "facebook/musicgen-melody-large",
+        "description": "Melody-conditioned, 3.3B params",
+        "stereo": False,
+        "melody": True,
+    },
+}
+
+
+def get_musicgen_model_choices() -> list[tuple[str, str]]:
+    """Get list of (display_name, model_key) tuples for UI dropdowns."""
+    return [(info["description"], key) for key, info in MUSICGEN_MODELS.items()]
+
+
+def get_musicgen_model_id(model_key: str) -> str:
+    """Get the Hugging Face model ID for a given model key."""
+    return MUSICGEN_MODELS.get(model_key, MUSICGEN_MODELS["musicgen-small"])["id"]
+
+
 @dataclass
 class MusicParameters:
     """Parameters for music generation."""
@@ -180,6 +243,7 @@ class MusicParameters:
     duration: int = 30  # seconds
     output_format: str = "all"  # midi, wav, mp3, all
     separate_tracks: bool = True  # Create separate files for each track
+    musicgen_model: str = "musicgen-small"  # MusicGen model key
 
     @classmethod
     def from_dict(cls, data: dict) -> MusicParameters:
@@ -219,6 +283,11 @@ class MusicParameters:
         if not bpm:
             bpm = random.randint(124, 128)  # noqa: S311
 
+        # Get MusicGen model (default to small for faster generation)
+        musicgen_model = data.get("musicgen_model", "musicgen-small")
+        if musicgen_model not in MUSICGEN_MODELS:
+            musicgen_model = "musicgen-small"
+
         return cls(
             prompt=data.get("prompt", ""),
             key=key,
@@ -230,6 +299,7 @@ class MusicParameters:
             duration=data.get("duration", 30),
             output_format=data.get("format", "all"),
             separate_tracks=True,
+            musicgen_model=musicgen_model,
         )
 
 
@@ -560,6 +630,9 @@ async def generate_audio_with_musicgen(
 
                 import subprocess
 
+                # Get the selected MusicGen model ID
+                model_id = get_musicgen_model_id(params.musicgen_model)
+
                 cmd = [
                     str(py),
                     str(script),
@@ -569,6 +642,8 @@ async def generate_audio_with_musicgen(
                     str(max(1, min(params.duration, 30))),
                     "--output",
                     str(output_path),
+                    "--model",
+                    model_id,
                 ]
                 res = subprocess.run(cmd, capture_output=True, text=True)
                 if res.returncode == 0:
@@ -600,7 +675,8 @@ async def generate_audio_with_musicgen(
         )
         prompt = ", ".join(prompt_parts)
 
-        model = MusicGen.get_pretrained("facebook/musicgen-small")
+        model_id = get_musicgen_model_id(params.musicgen_model)
+        model = MusicGen.get_pretrained(model_id)
         model.set_generation_params(duration=max(1, min(params.duration, 30)))
         wavs = model.generate([prompt])  # List[Tensor] with shape [1, T]
         audio = wavs[0].cpu().numpy().squeeze()
@@ -640,8 +716,8 @@ async def generate_audio_with_musicgen(
     prompt = ", ".join(prompt_parts)
 
     try:
-        # Load model (try local first to avoid downloads)
-        model_id = "facebook/musicgen-small"
+        # Load selected model (try local first to avoid downloads)
+        model_id = get_musicgen_model_id(params.musicgen_model)
         try:
             processor = AutoProcessor.from_pretrained(model_id, local_files_only=True)
             model = MusicgenForConditionalGeneration.from_pretrained(
@@ -693,6 +769,7 @@ async def generate_music(params: MusicParameters) -> dict[str, Any]:
             "bpm": params.bpm,
             "duration": params.duration,
             "genre": params.genre,
+            "musicgen_model": params.musicgen_model,
         },
     }
 
@@ -806,6 +883,12 @@ def format_music_result(result: dict) -> str:
         lines.append(
             f"**Style:** {result['params']['genre'].replace('_', ' ').title()}"
         )
+        # Show MusicGen model if present
+        if result["params"].get("musicgen_model"):
+            model_key = result["params"]["musicgen_model"]
+            model_info = MUSICGEN_MODELS.get(model_key, {})
+            model_desc = model_info.get("description", model_key)
+            lines.append(f"**AI Model:** {model_desc}")
         lines.append("")
 
         if result["files"]:

@@ -27,6 +27,14 @@ from PySide6.QtWidgets import (
 
 from .styles import COLORS
 
+# Import MusicGen models for the dropdown
+try:
+    from ..music import MUSICGEN_MODELS
+except ImportError:
+    MUSICGEN_MODELS = {
+        "musicgen-small": {"description": "Fast, 300M params (recommended)"},
+    }
+
 
 class ExpandingTextEdit(QTextEdit):
     """Text edit that expands with content up to a max height."""
@@ -244,6 +252,19 @@ class MusicGenerationDialog(QDialog):
         self.format_combo.addItems(["MP3", "WAV", "MIDI", "All"])
         grid.addWidget(self.format_combo, 8, 1)
 
+        # MusicGen model selector
+        grid.addWidget(QLabel("AI Model:"), 9, 0)
+        self.model_combo = QComboBox()
+        for key, info in MUSICGEN_MODELS.items():
+            # Display format: "musicgen-small - Fast, 300M params"
+            self.model_combo.addItem(f"{key} - {info['description']}", key)
+        self.model_combo.setCurrentIndex(0)  # Default to first (small)
+        self.model_combo.setToolTip(
+            "Select the MusicGen model for audio generation.\n"
+            "Larger models produce higher quality but are slower."
+        )
+        grid.addWidget(self.model_combo, 9, 1)
+
         layout.addLayout(grid)
 
         # Buttons
@@ -283,6 +304,7 @@ class MusicGenerationDialog(QDialog):
             "bpm": bpm_val,
             "duration": duration,
             "format": self.format_combo.currentText().lower(),
+            "musicgen_model": self.model_combo.currentData(),
         }
 
 

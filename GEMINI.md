@@ -118,7 +118,7 @@ cd vscode-extension && npm install && npm run package
 | `src/orchestrator.py` | Main logic: routing, providers, task classification |
 | `src/credentials.py` | Security-critical: API key management |
 | `src/storage.py` | SQLite persistence for conversation history |
-| `src/music.py` | MIDI and audio file generation |
+| `src/music.py` | MIDI and audio file generation (MusicGen with selectable models) |
 | `src/manage_models.py` | Utility for managing local AI models (disk space) |
 | `src/gui/` | PySide6 (Qt) desktop application |
 | `src/tui/` | Textual terminal interface |

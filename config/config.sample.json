@@ -99,5 +99,20 @@
     "summarization": ["claude-haiku-4.5", "gpt-4o-mini"],
     "local": ["mlx-llama8"],
     "long-context": ["gemini-1.5-pro", "claude-opus-4.5"]
+  },
+
+  "musicGeneration": {
+    "_comment": "MusicGen AI model for audio generation (requires .music-venv)",
+    "defaultModel": "musicgen-small",
+    "availableModels": [
+      "musicgen-small",
+      "musicgen-medium",
+      "musicgen-large",
+      "musicgen-stereo-small",
+      "musicgen-stereo-medium",
+      "musicgen-stereo-large",
+      "musicgen-melody",
+      "musicgen-melody-large"
+    ]
   }
 }

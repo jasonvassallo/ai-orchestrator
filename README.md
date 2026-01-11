@@ -371,7 +371,7 @@ AI Orchestrator includes a powerful music generation module optimized for electr
   - Offbeat open hi-hats
   - Minor chord progressions with 7ths
   - Default 124-128 BPM range
-- **AI Audio Generation**: MusicGen integration for audio file creation
+- **AI Audio Generation**: MusicGen integration with selectable models for audio file creation
 
 ### Usage
 
@@ -381,6 +381,7 @@ In the GUI app, click the **Music** toggle and configure:
 - Genre/style
 - Energy level
 - Duration
+- **AI Model** (MusicGen variant: small/medium/large, stereo, melody)
 
 Generated files are saved to `~/Music/AI Orchestrator/` and can be opened in:
 - Logic Pro
