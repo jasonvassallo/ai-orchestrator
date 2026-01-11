@@ -1603,8 +1603,8 @@ class MLXProvider(BaseProvider):
                 )
 
                 # Run vision generation in a thread
-                def _generate_vision() -> str:
-                    return vlm_generate(
+                def _generate_vision() -> tuple[str, int, int]:
+                    result = vlm_generate(
                         self._model,
                         self._processor,
                         formatted_prompt,
@@ -1612,8 +1612,15 @@ class MLXProvider(BaseProvider):
                         max_tokens=kwargs.get("max_tokens", 2048),
                         verbose=False,
                     )
+                    # mlx_vlm.generate returns GenerationResult with text and token counts
+                    text = result.text if hasattr(result, "text") else str(result)
+                    input_tokens = getattr(result, "prompt_tokens", 0)
+                    output_tokens = getattr(result, "generation_tokens", 0)
+                    return text, input_tokens, output_tokens
 
-                response_text = await asyncio.to_thread(_generate_vision)
+                response_text, vision_input_tokens, vision_output_tokens = (
+                    await asyncio.to_thread(_generate_vision)
+                )
             else:
                 # Text model generation using mlx_lm
                 from mlx_lm import generate
@@ -1638,14 +1645,23 @@ class MLXProvider(BaseProvider):
 
             latency = (time.time() - start_time) * 1000
 
+            # Build usage stats based on model type
+            if self._is_vision_model:
+                usage = {
+                    "input_tokens": vision_input_tokens,
+                    "output_tokens": vision_output_tokens,
+                }
+            else:
+                usage = {
+                    "input_tokens": len(prompt.split()) if "prompt" in dir() else 0,
+                    "output_tokens": len(response_text.split()),
+                }
+
             return APIResponse(
                 content=response_text,
                 model=model,
                 provider=self.provider_name,
-                usage={
-                    "input_tokens": len(prompt.split()) if "prompt" in dir() else 0,
-                    "output_tokens": len(response_text.split()),
-                },
+                usage=usage,
                 latency_ms=latency,
                 success=True,
             )
