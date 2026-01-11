@@ -326,7 +326,7 @@ class InputWidget(QFrame):
         ("Gemini 3.0 Flash (Preview)", "gemini-3-flash"),
         ("Gemini 2.0 Flash", "gemini-2.0-flash"),
         ("DeepSeek Chat", "deepseek-chat"),
-        ("MLX Llama 3.1 8B (Local)", "mlx-llama8"),
+        ("MLX Llama 3.2 11B Vision (Local)", "mlx-llama-vision-11b"),
         ("MLX Qwen3 4B (Local)", "mlx-qwen3-4b"),
         ("MLX Ministral 14B Reasoning (Local)", "mlx-ministral-14b-reasoning"),
     ]

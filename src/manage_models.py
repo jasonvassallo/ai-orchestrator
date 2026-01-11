@@ -302,7 +302,7 @@ def main() -> None:
                 pass
 
     print("\n✨ Done! You can now run the orchestrator with:")
-    print("   python -m src.orchestrator 'Hello' --model mlx-llama8")
+    print("   python -m src.orchestrator 'Hello' --model mlx-llama-vision-11b")
 
 
 if __name__ == "__main__":

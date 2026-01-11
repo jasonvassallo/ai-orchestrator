@@ -298,7 +298,7 @@ python setup_app.py py2app
 | `llama3.2` | Ollama | Private, offline | Free, privacy-first |
 | `codellama` | Ollama | Private coding | Free, code-focused |
 | `deepseek-coder-v2` | Ollama | Complex code | Excellent coding, free |
-| `mlx-llama8` | MLX | Apple Silicon | Free, fast on M1/M2/M3/M4, private |
+| `mlx-llama-vision-11b` | MLX | Apple Silicon, Vision | Vision, documents, charts, writing, 128K context |
 | `mlx-qwen3-4b` | MLX | Apple Silicon, Daily/Coding | Fast, efficient, local, private |
 | `mlx-ministral-14b-reasoning` | MLX | Apple Silicon, Deep Thinking | Reasoning, math, STEM, local |
 
@@ -318,7 +318,7 @@ Based on which providers you want to use:
 | Perplexity | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) | Optional |
 | DeepSeek | [platform.deepseek.com](https://platform.deepseek.com/) | Optional |
 | Ollama | N/A (local) | Optional |
-| MLX | N/A (local, requires `mlx-llama8` CLI) | Optional |
+| MLX | N/A (local, requires `mlx-lm` or `mlx-vlm`) | Optional |
 
 **You already have:** Claude (Anthropic), OpenAI, Ollama, and Perplexity - these are ready to use!
 
@@ -443,14 +443,14 @@ Copy `config/config.sample.json` to `~/.ai_orchestrator/config.json`:
     "code": ["claude-sonnet-4.5", "codestral", "deepseek-chat"],
     "reasoning": ["o1", "claude-opus-4.5", "deepseek-reasoner"],
     "websearch": ["perplexity-sonar-pro", "perplexity-sonar"],
-    "local": ["mlx-llama8"]
+    "local": ["mlx-llama-vision-11b"]
   }
 }
 ```
 
 To force MLX for local routing, set `defaults.preferLocal` to `true`, keep
 `defaults.localProvider` as `mlx`, and point `taskRouting.local` at
-`mlx-llama8`.
+`mlx-llama-vision-11b`.
 
 To override the Vertex AI location (defaults to `global`), add:
 

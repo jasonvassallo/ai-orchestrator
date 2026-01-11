@@ -82,8 +82,8 @@ class AIMenuBarApp(rumps.App):
                         callback=lambda _: self.set_model("gemini-3-pro"),
                     ),
                     rumps.MenuItem(
-                        "MLX Llama 8B (Local)",
-                        callback=lambda _: self.set_model("mlx-llama8"),
+                        "MLX Llama 3.2 11B Vision (Local)",
+                        callback=lambda _: self.set_model("mlx-llama-vision-11b"),
                     ),
                     rumps.MenuItem(
                         "MLX Qwen3 4B (Local)",

@@ -34,7 +34,7 @@
       "enabled": true,
       "priority": 70
     },
-    "mlx-llama8": {
+    "mlx-llama-vision-11b": {
       "enabled": true,
       "priority": 60
     }
@@ -97,7 +97,7 @@
     "reasoning": ["o1", "claude-opus-4.5"],
     "creative": ["claude-opus-4.5", "gpt-4o"],
     "summarization": ["claude-haiku-4.5", "gpt-4o-mini"],
-    "local": ["mlx-llama8"],
+    "local": ["mlx-llama-vision-11b"],
     "long-context": ["gemini-1.5-pro", "claude-opus-4.5"]
   },
 

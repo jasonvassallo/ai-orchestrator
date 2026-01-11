@@ -1347,34 +1347,37 @@ class MLXProvider(BaseProvider):
     """
     MLX local model provider for Apple Silicon.
 
-    Uses the official mlx-lm Python package for optimized inference
-    on Mac devices with Apple Silicon (M1/M2/M3/M4).
+    Uses mlx-lm for text models and mlx-vlm for vision models,
+    optimized for Mac devices with Apple Silicon (M1/M2/M3/M4).
     """
 
     def __init__(
         self,
         rate_limiter: RateLimiter,
         model_path: str = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
+        is_vision_model: bool = False,
     ):
         super().__init__(rate_limiter)
         self.model_path = model_path
+        self._is_vision_model = is_vision_model
         self._available = False
         self._model: Any = None
-        self._tokenizer: Any = None
+        self._tokenizer: Any = None  # For text models
+        self._processor: Any = None  # For vision models
+        self._config: Any = None  # For vision models
 
     @property
     def provider_name(self) -> str:
         return "mlx"
 
     async def initialize(self) -> bool:
-        """Initialize MLX model and tokenizer"""
+        """Initialize MLX model and tokenizer/processor"""
         try:
             import os
             from pathlib import Path
 
             import mlx.core as mx
             from huggingface_hub import snapshot_download, try_to_load_from_cache
-            from mlx_lm import load
 
             def _find_local_snapshot_dir(repo_id: str) -> str | None:
                 """Search common HF cache roots for a snapshot dir with safetensors."""
@@ -1471,25 +1474,45 @@ class MLXProvider(BaseProvider):
 
             logger.info(f"Loading MLX model: {self.model_path}")
 
-            # Run load in a thread to avoid blocking the event loop (GUI freeze fix)
-            def _load_model() -> Any:
-                return load(self.model_path)
+            # Use different loading strategy based on model type
+            if self._is_vision_model:
+                # Load vision model with mlx_vlm
+                from mlx_vlm import load as vlm_load
+                from mlx_vlm.utils import load_config
 
-            result = await asyncio.to_thread(_load_model)
+                def _load_vision_model() -> tuple[Any, Any, Any]:
+                    model, processor = vlm_load(self.model_path)
+                    config = load_config(self.model_path)
+                    return model, processor, config
 
-            if isinstance(result, tuple) and len(result) >= 2:
-                self._model = result[0]
-                self._tokenizer = result[1]
+                result = await asyncio.to_thread(_load_vision_model)
+                self._model, self._processor, self._config = result
+                logger.info("Vision model loaded successfully with mlx_vlm")
             else:
-                # Fallback if signature matches expectation exactly
-                self._model, self._tokenizer = result
+                # Load text model with mlx_lm
+                from mlx_lm import load
+
+                def _load_model() -> Any:
+                    return load(self.model_path)
+
+                result = await asyncio.to_thread(_load_model)
+
+                if isinstance(result, tuple) and len(result) >= 2:
+                    self._model = result[0]
+                    self._tokenizer = result[1]
+                else:
+                    # Fallback if signature matches expectation exactly
+                    self._model, self._tokenizer = result
 
             self._available = True
             return True
 
         except ImportError as e:
             logger.warning(f"MLX dependencies not installed: {e}")
-            logger.warning("Install with: pip install mlx-lm huggingface-hub")
+            if self._is_vision_model:
+                logger.warning("Install with: pip install mlx-vlm huggingface-hub")
+            else:
+                logger.warning("Install with: pip install mlx-lm huggingface-hub")
             self._available = False
             return False
         except Exception as e:
@@ -1500,41 +1523,118 @@ class MLXProvider(BaseProvider):
     async def complete(
         self, messages: list[dict[str, Any]], model: str, **kwargs: Any
     ) -> APIResponse:
-        if not self._available or self._model is None or self._tokenizer is None:
-            success = await self.initialize()
-            if not success or self._model is None or self._tokenizer is None:
-                return APIResponse(
-                    content="",
-                    model=model,
-                    provider=self.provider_name,
-                    usage={},
-                    latency_ms=0,
-                    success=False,
-                    error="MLX provider not available or failed to initialize",
-                )
+        # Check initialization based on model type
+        if self._is_vision_model:
+            if not self._available or self._model is None or self._processor is None:
+                success = await self.initialize()
+                if not success or self._model is None or self._processor is None:
+                    return APIResponse(
+                        content="",
+                        model=model,
+                        provider=self.provider_name,
+                        usage={},
+                        latency_ms=0,
+                        success=False,
+                        error="MLX vision provider not available or failed to initialize",
+                    )
+        else:
+            if not self._available or self._model is None or self._tokenizer is None:
+                success = await self.initialize()
+                if not success or self._model is None or self._tokenizer is None:
+                    return APIResponse(
+                        content="",
+                        model=model,
+                        provider=self.provider_name,
+                        usage={},
+                        latency_ms=0,
+                        success=False,
+                        error="MLX provider not available or failed to initialize",
+                    )
 
         start_time = time.time()
 
         try:
-            from mlx_lm import generate
+            if self._is_vision_model:
+                # Vision model generation using mlx_vlm
+                from mlx_vlm import generate as vlm_generate
+                from mlx_vlm.prompt_utils import apply_chat_template
 
-            # Convert messages to prompt using tokenizer's template if available
-            if hasattr(self._tokenizer, "apply_chat_template"):
-                prompt = self._tokenizer.apply_chat_template(
-                    messages, tokenize=False, add_generation_prompt=True
+                # Extract images from messages (supports OpenAI-style multimodal format)
+                images: list[str] = []
+                text_parts: list[str] = []
+
+                for msg in messages:
+                    content = msg.get("content", "")
+                    if isinstance(content, list):
+                        # Multimodal message with mixed content
+                        for item in content:
+                            if isinstance(item, dict):
+                                if item.get("type") == "image_url":
+                                    # OpenAI format: {"type": "image_url", "image_url": {"url": "..."}}
+                                    url = item.get("image_url", {}).get("url", "")
+                                    if url.startswith("file://"):
+                                        images.append(url[7:])  # Strip file://
+                                    elif url.startswith("/"):
+                                        images.append(url)  # Local path
+                                    elif url.startswith("data:"):
+                                        # Base64 encoded - skip for now
+                                        logger.warning("Base64 images not yet supported")
+                                    else:
+                                        images.append(url)
+                                elif item.get("type") == "image":
+                                    # Alternative format
+                                    if "path" in item:
+                                        images.append(item["path"])
+                                elif item.get("type") == "text":
+                                    text_parts.append(item.get("text", ""))
+                            elif isinstance(item, str):
+                                text_parts.append(item)
+                    elif isinstance(content, str):
+                        text_parts.append(content)
+
+                prompt = " ".join(text_parts) if text_parts else "Describe this image."
+
+                # Apply chat template for vision model
+                formatted_prompt = apply_chat_template(
+                    self._processor,
+                    self._config,
+                    prompt,
+                    num_images=len(images) if images else 0,
                 )
-            else:
-                prompt = self._format_messages(messages)
 
-            # Run generation in a thread to avoid blocking the event loop
-            response_text = await asyncio.to_thread(
-                generate,
-                self._model,
-                self._tokenizer,
-                prompt=prompt,
-                max_tokens=kwargs.get("max_tokens", 1024),
-                verbose=False,
-            )
+                # Run vision generation in a thread
+                def _generate_vision() -> str:
+                    return vlm_generate(
+                        self._model,
+                        self._processor,
+                        formatted_prompt,
+                        images if images else None,
+                        max_tokens=kwargs.get("max_tokens", 2048),
+                        verbose=False,
+                    )
+
+                response_text = await asyncio.to_thread(_generate_vision)
+            else:
+                # Text model generation using mlx_lm
+                from mlx_lm import generate
+
+                # Convert messages to prompt using tokenizer's template if available
+                if hasattr(self._tokenizer, "apply_chat_template"):
+                    prompt = self._tokenizer.apply_chat_template(
+                        messages, tokenize=False, add_generation_prompt=True
+                    )
+                else:
+                    prompt = self._format_messages(messages)
+
+                # Run generation in a thread to avoid blocking the event loop
+                response_text = await asyncio.to_thread(
+                    generate,
+                    self._model,
+                    self._tokenizer,
+                    prompt=prompt,
+                    max_tokens=kwargs.get("max_tokens", 1024),
+                    verbose=False,
+                )
 
             latency = (time.time() - start_time) * 1000
 
@@ -1543,7 +1643,7 @@ class MLXProvider(BaseProvider):
                 model=model,
                 provider=self.provider_name,
                 usage={
-                    "input_tokens": len(prompt.split()),
+                    "input_tokens": len(prompt.split()) if "prompt" in dir() else 0,
                     "output_tokens": len(response_text.split()),
                 },
                 latency_ms=latency,
@@ -1566,6 +1666,15 @@ class MLXProvider(BaseProvider):
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            if isinstance(content, list):
+                # Handle multimodal messages - extract text only
+                text_parts = []
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        text_parts.append(item.get("text", ""))
+                    elif isinstance(item, str):
+                        text_parts.append(item)
+                content = " ".join(text_parts)
             if role == "system":
                 parts.append(f"System: {content}")
             elif role == "assistant":
@@ -2463,27 +2572,34 @@ class ModelRegistry:
             strengths=("deep reasoning", "math", "problem-solving"),
         ),
         # MLX Local Models (Apple Silicon optimized)
-        "mlx-llama8": ModelCapability(
-            name="MLX Llama 8B",
+        "mlx-llama-vision-11b": ModelCapability(
+            name="MLX Llama 3.2 11B Vision",
             provider="mlx",
-            model_id="mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
+            model_id="mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
             task_types=(
-                TaskType.GENERAL_NLP,
+                TaskType.MULTIMODAL,
                 TaskType.LOCAL_MODEL,
-                TaskType.CODE_GENERATION,
+                TaskType.GENERAL_NLP,
+                TaskType.CREATIVE_WRITING,
+                TaskType.SUMMARIZATION,
             ),
-            context_window=8192,
+            context_window=131072,  # 128K context
             cost_per_1k_input=0,  # Free local inference
             cost_per_1k_output=0,
             strengths=(
-                "free",
+                "vision",
+                "document understanding",
+                "chart analysis",
+                "diagram reasoning",
+                "image captioning",
+                "writing",
+                "summarization",
+                "128K context",
+                "local",
                 "private",
-                "offline",
-                "fast on Apple Silicon",
-                "good speed and efficiency",
-                "objective responses",
             ),
-            max_output_tokens=4096,
+            max_output_tokens=2048,
+            supports_vision=True,
             supports_streaming=True,
         ),
         "mlx-qwen3-4b": ModelCapability(
@@ -2801,7 +2917,9 @@ class AIOrchestrator:
                 model_def = ModelRegistry.MODELS.get(model_key)
                 if model_def:
                     provider = MLXProvider(
-                        self.rate_limiter, model_path=model_def.model_id
+                        self.rate_limiter,
+                        model_path=model_def.model_id,
+                        is_vision_model=model_def.supports_vision,
                     )
                 else:
                     logger.error(f"Unknown MLX provider/model: {provider_name}")
