@@ -327,8 +327,8 @@ class InputWidget(QFrame):
         ("Gemini 2.0 Flash", "gemini-2.0-flash"),
         ("DeepSeek Chat", "deepseek-chat"),
         ("MLX Llama 3.1 8B (Local)", "mlx-llama8"),
-        ("MLX Qwen 3 32B (Local)", "mlx-qwen-3-32b"),
-        ("MLX Qwen Coder 14B (Local)", "mlx-qwen-coder-14b"),
+        ("MLX Qwen3 4B (Local)", "mlx-qwen3-4b"),
+        ("MLX Ministral 14B Reasoning (Local)", "mlx-ministral-14b-reasoning"),
     ]
 
     def __init__(self, parent: QWidget | None = None):

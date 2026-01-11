@@ -299,8 +299,8 @@ python setup_app.py py2app
 | `codellama` | Ollama | Private coding | Free, code-focused |
 | `deepseek-coder-v2` | Ollama | Complex code | Excellent coding, free |
 | `mlx-llama8` | MLX | Apple Silicon | Free, fast on M1/M2/M3/M4, private |
-| `mlx-qwen-3-32b` | MLX | Apple Silicon, Vision | High quality, local, private |
-| `mlx-qwen-coder-14b` | MLX | Apple Silicon, Coding | Code-focused, local, private |
+| `mlx-qwen3-4b` | MLX | Apple Silicon, Daily/Coding | Fast, efficient, local, private |
+| `mlx-ministral-14b-reasoning` | MLX | Apple Silicon, Deep Thinking | Reasoning, math, STEM, local |
 
 ## API Keys Required
 

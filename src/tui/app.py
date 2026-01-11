@@ -49,8 +49,8 @@ MODELS = [
     ("Gemini 3.0 Flash", "gemini-3-flash"),
     ("DeepSeek Chat", "deepseek-chat"),
     ("MLX Llama 8B (Local)", "mlx-llama8"),
-    ("MLX Qwen 3 32B (Local)", "mlx-qwen-3-32b"),
-    ("MLX Qwen Coder 14B (Local)", "mlx-qwen-coder-14b"),
+    ("MLX Qwen3 4B (Local)", "mlx-qwen3-4b"),
+    ("MLX Ministral 14B Reasoning (Local)", "mlx-ministral-14b-reasoning"),
 ]
 
 
