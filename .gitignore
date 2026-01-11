@@ -96,6 +96,7 @@ ipython_config.py
 
 # Environments
 .venv
+.music-venv
 venv/
 ENV/
 env.bak/

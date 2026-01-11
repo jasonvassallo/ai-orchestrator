@@ -3,12 +3,12 @@
   "include": ["src"],
   "exclude": [
     "**/.venv",
-    "build",
-    "dist",
-    "src/gui",
-    "src/tui",
-    "src/menubar",
-    "src/music"
+    "**/build",
+    "**/dist",
+    "**/src/gui/**",
+    "**/src/tui/**",
+    "**/src/menubar/**",
+    "**/src/music.py"
   ],
   "reportMissingImports": "none",
   "reportMissingTypeStubs": "none",

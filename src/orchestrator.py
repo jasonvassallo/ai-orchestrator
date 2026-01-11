@@ -1370,11 +1370,11 @@ class MLXProvider(BaseProvider):
         """Initialize MLX model and tokenizer"""
         try:
             import os
+            from pathlib import Path
 
             import mlx.core as mx
             from huggingface_hub import snapshot_download, try_to_load_from_cache
             from mlx_lm import load
-            from pathlib import Path
 
             def _find_local_snapshot_dir(repo_id: str) -> str | None:
                 """Search common HF cache roots for a snapshot dir with safetensors."""
@@ -2846,7 +2846,7 @@ class AIOrchestrator:
         routing_config = self._user_config.get("taskRouting", {})
         preferred_models = routing_config.get(task_key)
 
-        candidates = []
+        candidates: list[ModelCapability] = []
 
         if preferred_models and isinstance(preferred_models, list):
             # If user specified models for this task, restrict to those
@@ -2899,7 +2899,7 @@ class AIOrchestrator:
         candidates = self._apply_local_provider_preference(candidates)
 
         # Score candidates using provider characteristics
-        scored = []
+        scored: list[tuple[ModelCapability, float]] = []
         for model in candidates:
             score = 0.0
 
@@ -3209,7 +3209,7 @@ class AIOrchestrator:
         """
         Query multiple models in parallel for comparison.
         """
-        tasks = []
+        tasks: list[Coroutine[Any, Any, APIResponse]] = []
         for model_key in models:
             tasks.append(
                 self.query(

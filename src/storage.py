@@ -33,7 +33,7 @@ class Message:
     role: str  # 'user', 'assistant', 'system'
     content: str
     created_at: datetime
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=lambda: {})
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -47,15 +47,15 @@ class Message:
         }
 
     @classmethod
-    def from_row(cls, row: tuple) -> Message:
+    def from_row(cls, row: tuple[Any, ...]) -> Message:
         """Create from database row."""
         return cls(
-            id=row[0],
-            conversation_id=row[1],
-            role=row[2],
-            content=row[3],
-            created_at=datetime.fromisoformat(row[4]),
-            metadata=json.loads(row[5]) if row[5] else {},
+            id=str(row[0]),
+            conversation_id=str(row[1]),
+            role=str(row[2]),
+            content=str(row[3]),
+            created_at=datetime.fromisoformat(str(row[4])),
+            metadata=json.loads(str(row[5])) if row[5] else {},
         )
 
 
@@ -68,8 +68,8 @@ class Conversation:
     created_at: datetime
     updated_at: datetime
     model: str | None = None
-    settings: dict[str, Any] = field(default_factory=dict)
-    messages: list[Message] = field(default_factory=list)
+    settings: dict[str, Any] = field(default_factory=lambda: {})
+    messages: list[Message] = field(default_factory=lambda: [])
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -84,15 +84,15 @@ class Conversation:
         }
 
     @classmethod
-    def from_row(cls, row: tuple) -> Conversation:
+    def from_row(cls, row: tuple[Any, ...]) -> Conversation:
         """Create from database row (without messages)."""
         return cls(
-            id=row[0],
-            title=row[1],
-            created_at=datetime.fromisoformat(row[2]),
-            updated_at=datetime.fromisoformat(row[3]),
-            model=row[4],
-            settings=json.loads(row[5]) if row[5] else {},
+            id=str(row[0]),
+            title=str(row[1]),
+            created_at=datetime.fromisoformat(str(row[2])),
+            updated_at=datetime.fromisoformat(str(row[3])),
+            model=str(row[4]) if row[4] else None,
+            settings=json.loads(str(row[5])) if row[5] else {},
             messages=[],
         )
 
@@ -227,8 +227,8 @@ class ConversationStorage:
         settings: dict[str, Any] | None = None,
     ) -> bool:
         """Update conversation metadata."""
-        updates = []
-        params = []
+        updates: list[str] = []
+        params: list[Any] = []
 
         if title is not None:
             updates.append("title = ?")
@@ -319,8 +319,8 @@ class ConversationStorage:
         metadata: dict[str, Any] | None = None,
     ) -> bool:
         """Update a message's content or metadata."""
-        updates = []
-        params = []
+        updates: list[str] = []
+        params: list[Any] = []
 
         if content is not None:
             updates.append("content = ?")
