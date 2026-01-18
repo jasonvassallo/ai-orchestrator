@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Security: Hardened](https://img.shields.io/badge/security-hardened-green.svg)](https://github.com/jasonvassallo/ai-orchestrator/security)
 
-AI Orchestrator automatically routes your queries to the best AI model based on task type. It supports **11 providers** including OpenAI, Anthropic Claude, Google Gemini, Vertex AI, Mistral, Groq, xAI (Grok), Perplexity, DeepSeek, Ollama, and MLX (Apple Silicon optimized) - all with secure credential management and production-ready features.
+AI Orchestrator automatically routes your queries to the best AI model based on task type. It supports **11 providers** including OpenAI, Anthropic Claude, Google (Gemini & Vertex AI), Mistral, Groq, xAI (Grok), Perplexity, DeepSeek, Moonshot (Kimi K2), Ollama, and MLX (Apple Silicon optimized) - all with secure credential management and production-ready features.
 
 ## Features
 
@@ -14,6 +14,8 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 - **Menu Bar App**: Quick access from your Mac's menu bar
 - **Terminal UI**: Gorgeous terminal-based interface
 - **Intelligent Routing**: Automatically selects the best model based on task classification
+- **Multi-Model Chaining**: Sequential model execution for complex tasks (e.g., web search → deep analysis)
+- **Extended Thinking**: Kimi K2 Thinking integration with visible reasoning traces
 - **Secure Credentials**: API keys stored in OS keychain or encrypted file - NEVER in code
 - **High Performance**: Async operations, rate limiting, and retry logic with exponential backoff
 - **Vertex AI Resilience**: Structured retryable 429/resource-exhausted handling with clearer error messages
@@ -62,6 +64,7 @@ export GROQ_API_KEY="..."
 export XAI_API_KEY="..."
 export PERPLEXITY_API_KEY="..."
 export DEEPSEEK_API_KEY="..."
+export MOONSHOT_API_KEY="..."
 ```
 
 Vertex AI models use Application Default Credentials (ADC) instead of an API key:
@@ -291,6 +294,13 @@ python setup_app.py py2app
 | `deepseek-chat` | General, coding | 64K | Very cost-effective |
 | `deepseek-reasoner` | Math, reasoning | 64K | Deep reasoning, problem-solving |
 
+### Moonshot (Kimi K2 - Extended Thinking)
+
+| Model | Best For | Context | Strengths |
+|-------|----------|---------|-----------|
+| `kimi-k2-thinking` | Complex reasoning, math | 256K | Extended thinking with visible reasoning traces |
+| `kimi-k2` | General, coding | 256K | Fast, cost-effective |
+
 ### Local Models (Ollama & MLX)
 
 | Model | Provider | Best For | Strengths |
@@ -317,6 +327,7 @@ Based on which providers you want to use:
 | xAI | [console.x.ai](https://console.x.ai/) | Optional |
 | Perplexity | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) | Optional |
 | DeepSeek | [platform.deepseek.com](https://platform.deepseek.com/) | Optional |
+| Moonshot | [platform.moonshot.ai](https://platform.moonshot.ai/) | Optional |
 | Ollama | N/A (local) | Optional |
 | MLX | N/A (local, requires `mlx-lm` or `mlx-vlm`) | Optional |
 
@@ -600,5 +611,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 - xAI for Grok
 - Perplexity for web search
 - DeepSeek for cost-effective models
+- Moonshot AI for Kimi K2 extended thinking
 - Ollama for local model support
 - Apple for MLX framework

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AI Orchestrator is an intelligent multi-model AI router written in Python. It automatically routes user queries to the best AI model based on task classification (e.g., coding, reasoning, creative writing). It supports 11 providers (OpenAI, Anthropic, Google, Vertex AI, Mistral, Groq, xAI, Perplexity, DeepSeek, Ollama, MLX) with 25+ models, featuring secure credential management and multiple UI options (CLI, GUI, TUI, Menu Bar, VS Code Extension).
+AI Orchestrator is an intelligent multi-model AI router written in Python. It automatically routes user queries to the best AI model based on task classification (e.g., coding, reasoning, creative writing, extended thinking). It supports 11 providers (OpenAI, Anthropic, Google/Vertex AI, Mistral, Groq, xAI, Perplexity, DeepSeek, Moonshot, Ollama, MLX) with 25+ models, featuring secure credential management, multi-model chaining, and multiple UI options (CLI, GUI, TUI, Menu Bar, VS Code Extension).
 
 ## Common Commands
 
@@ -132,7 +132,10 @@ src/orchestrator.py
 │   ├── GroqProvider
 │   ├── XAIProvider
 │   ├── PerplexityProvider
-│   └── DeepSeekProvider
+│   ├── DeepSeekProvider
+│   └── MoonshotProvider         - Kimi K2 extended thinking models
+├── LLMRouter                    - Smart multi-model routing decisions
+├── ChainedExecutor              - Sequential multi-model execution
 ├── RateLimiter                  - Token bucket rate limiting per provider
 ├── RetryHandler                 - Exponential backoff with jitter
 ├── InputValidator               - Security validation and sanitization
@@ -151,9 +154,12 @@ Three-tier fallback chain with priority order:
 1. User prompt → `InputValidator.validate_prompt()` → Security checks
 2. Prompt → `TaskClassifier.classify()` → List of (TaskType, confidence) tuples
 3. **Smart Cache Detection** → Check if local model (MLX/MusicGen) exists → Enable `HF_HUB_OFFLINE`
-4. Task types → `AIOrchestrator.select_model()` → Best `ModelCapability`
-5. Model → `AIOrchestrator._get_provider()` → Provider instance (lazy init)
-6. Provider → `RetryHandler.execute_with_retry()` → `APIResponse`
+4. Task types → `needs_llm_routing()` → Check if multiple specialized tasks detected
+5. If single task: `AIOrchestrator.select_model()` → Best `ModelCapability`
+6. If multi-task: `LLMRouter.route()` → `RoutingDecision` (models list, chain flag)
+7. If chaining: `ChainedExecutor.execute_chain()` → Sequential model execution with context passing
+8. Model → `AIOrchestrator._get_provider()` → Provider instance (lazy init)
+9. Provider → `RetryHandler.execute_with_retry()` → `APIResponse` (or `ChainedResponse` for chains)
 
 ### UI Layer
 
@@ -203,6 +209,26 @@ Both `ollama` and `mlx` are recognized as local providers:
 - `prefer_local=True` filters to only these providers
 - `TaskType.LOCAL_MODEL` detection gives them a scoring bonus
 - MLX is optimized for Apple Silicon via command-line invocation
+
+### Multi-Model Routing and Chaining
+
+The orchestrator supports intelligent multi-model routing for complex tasks:
+
+1. **Tiered Routing**: Regex-based `TaskClassifier` runs first (free, instant). If multiple specialized tasks are detected at ≥0.7 confidence, escalates to `LLMRouter` (Claude Haiku) for smart routing decisions.
+
+2. **Specialized Task Types**: `WEB_SEARCH`, `EXTENDED_THINKING`, `CODE_GENERATION`, `MULTIMODAL` trigger multi-model consideration.
+
+3. **Chaining**: When `RoutingDecision.chain=True`, `ChainedExecutor` runs models sequentially, passing context between steps. Example: Perplexity (web search) → Kimi K2 (deep analysis).
+
+4. **Labeled Output**: Chained responses use section labels like `[Web Search Results]`, `[Thinking]`, `[Answer]` for transparency.
+
+### Extended Thinking (Kimi K2)
+
+Moonshot's Kimi K2 Thinking model provides visible reasoning traces:
+- `reasoning_content` field in API response contains the thinking process
+- 25-minute timeout for complex reasoning tasks
+- Temperature 1.0 recommended for thinking models
+- Supports `TaskType.EXTENDED_THINKING` classification
 
 ### Local Model Optimization (Smart Cache)
 
