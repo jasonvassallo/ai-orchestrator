@@ -2,16 +2,18 @@
 
 ## Project Structure & Module Organization
 
-The core Python package lives in `src/`, with `src/orchestrator.py` as the main entry point, `src/credentials.py` for secure key handling, `src/storage.py` for persistence, and `src/manage_models.py` for local model cleanup/download management. UI clients are organized under `src/gui/` (PySide6), `src/tui/` (Textual), and `src/menubar/` (rumps). Configuration lives in `config/` (`config-schema.json`, `config.sample.json`), tests in `tests/`, helper scripts in `scripts/`, and the VS Code extension under `vscode-extension/`. Build artifacts land in `dist/` and `build/`.
+The core Python package lives in `src/`, with `src/orchestrator.py` as the main entry point, `src/credentials.py` for secure key handling, `src/storage.py` for persistence, `src/music.py` for MIDI and MusicGen audio generation, and `src/manage_models.py` for local model cleanup/download management. UI clients are organized under `src/gui/` (PySide6), `src/tui/` (Textual), and `src/menubar/` (rumps). Configuration lives in `config/` (`config-schema.json`, `config.sample.json`), tests in `tests/`, helper scripts in `scripts/`, and the VS Code extension under `vscode-extension/`. Build artifacts land in `dist/` and `build/`.
 
 ## Build, Test, and Development Commands
 
+- `pip install -e "."` installs the minimal CLI-only dependencies.
 - `pip install -e ".[dev]"` installs test, lint, and type-check tooling.
 - `pip install -e ".[all]"` installs all providers and UI dependencies.
 - `python -m src.orchestrator "..."` or `ai-orchestrator "..."` runs the CLI.
 - `ai-app`, `ai-chat`, and `ai-menubar` run the GUI, TUI, and menu bar apps.
 - `python -m src.gui.app`, `python -m src.tui.app`, `python -m src.menubar.app` run UI apps directly.
 - `python -m src.manage_models` manages local model cache (disk cleanup).
+- `python -m src.credentials` or `ai-configure` configures API credentials.
 - `python setup_app.py py2app` builds the macOS `.app` bundle.
 - `cd vscode-extension && npm install && npm run package` builds the VS Code extension.
 - `pytest` runs all tests; `pytest --cov=src --cov-report=html` generates coverage.
@@ -22,17 +24,20 @@ The core Python package lives in `src/`, with `src/orchestrator.py` as the main 
 
 ## Architecture Overview
 
-The orchestrator supports 11 providers: OpenAI, Anthropic, Google, Vertex AI, Mistral, Groq, xAI, Perplexity, DeepSeek, Ollama, and MLX (Apple Silicon local inference). All providers inherit from `BaseProvider` with `provider_name`, `initialize()`, and `complete()` methods.
+The orchestrator supports 11 providers: OpenAI, Anthropic, Google (Gemini & Vertex AI), Mistral, Groq, xAI, Perplexity, DeepSeek, Moonshot, Ollama, and MLX (Apple Silicon local inference). All providers inherit from `BaseProvider` with `provider_name`, `initialize()`, and `complete()` methods.
 
 Key components in `src/orchestrator.py`:
 - `TaskType` enum classifies prompts (CODE_GENERATION, REASONING, CREATIVE_WRITING, etc.)
+- `TaskClassifier` classifies prompts into task types with confidence scores
 - `ModelCapability` dataclass defines model attributes (task_types, costs, context_window)
 - `ProviderCharacteristics` dataclass captures provider strengths/weaknesses for intelligent selection
 - `PROVIDER_CHARACTERISTICS` registry maps providers to numeric scores (contextual_understanding, creativity_originality, code_quality, etc.)
 - `ModelRegistry.MODELS` dict contains 25+ model definitions
 - `AIOrchestrator.select_model()` uses multi-factor scoring: task match, provider characteristics, cost optimization, context window bonus, and local model bonus
+- `LLMRouter` and `ChainedExecutor` enable multi-model routing and sequential chaining
+- `RateLimiter`, `RetryHandler`, and `InputValidator` enforce throttling, retries, and prompt safety
 
-Local providers (`ollama`, `mlx`) are recognized via `local_providers` set in `get_models_for_task()`.
+Local providers (`ollama`, `mlx`) are recognized via `local_providers` set in `get_models_for_task()`. `prefer_local=True` filters to these providers and `TaskType.LOCAL_MODEL` gives them a scoring bonus.
 
 ## UI Layer
 
@@ -58,9 +63,10 @@ Credentials fall back in this order:
 1. Prompt validation via `InputValidator.validate_prompt()`
 2. Task classification via `TaskClassifier.classify()`
 3. Optional smart cache detection for local models
-4. Model selection via `AIOrchestrator.select_model()`
-5. Provider initialization via `AIOrchestrator._get_provider()`
-6. Request execution with retries via `RetryHandler.execute_with_retry()` (retryable APIResponse errors and Vertex AI HTTP failures are surfaced for backoff)
+4. If multi-task, `needs_llm_routing()` uses `LLMRouter.route()` and optional `ChainedExecutor` sequencing
+5. If single-task, `AIOrchestrator.select_model()` chooses the best `ModelCapability`
+6. Provider initialization via `AIOrchestrator._get_provider()`
+7. Request execution with retries via `RetryHandler.execute_with_retry()` (retryable APIResponse errors and Vertex AI HTTP failures are surfaced for backoff)
 
 ## Local Model Optimization (Smart Cache)
 For MLX/MusicGen, the orchestrator checks the local Hugging Face cache first across multiple roots:
