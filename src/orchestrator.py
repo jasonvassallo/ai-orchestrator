@@ -3332,6 +3332,7 @@ class AIOrchestrator:
         prefer_local: bool | None = None,
         cost_optimize: bool | None = None,
         verbose: bool = False,
+        enable_llm_routing: bool | None = None,
     ) -> None:
         self.verbose = verbose
 
@@ -3348,6 +3349,9 @@ class AIOrchestrator:
         )
         self.cost_optimize = self._resolve_bool_config(
             cost_optimize, defaults, "costOptimize"
+        )
+        self.enable_llm_routing = self._resolve_bool_config(
+            enable_llm_routing, defaults, "enableLLMRouting"
         )
         self.local_provider_preference = self._resolve_local_provider_preference(
             defaults
@@ -3823,6 +3827,82 @@ class AIOrchestrator:
 
         if self.verbose:
             logger.info(f"Classified task types: {task_types}")
+
+        # Check for multi-model routing (only when no model override)
+        if (
+            not model_override
+            and self.enable_llm_routing
+            and needs_llm_routing(task_types)
+        ):
+            try:
+                # Get Anthropic provider for routing
+                anthropic_provider = await self._get_provider("anthropic")
+                if anthropic_provider:
+                    router = LLMRouter(anthropic_provider)
+                    routing = await router.route(prompt, task_types)
+
+                    if self.verbose:
+                        logger.info(
+                            f"LLM Router decision: models={routing.models}, "
+                            f"chain={routing.chain}, reasoning={routing.reasoning}"
+                        )
+
+                    if routing.chain and len(routing.models) > 1:
+                        # Execute chained response
+                        executor = ChainedExecutor(self._get_provider)
+                        chained_response = await executor.execute_chain(
+                            prompt=prompt,
+                            routing=routing,
+                            system_prompt=system_prompt,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                        )
+
+                        # Update conversation history with final response
+                        if chained_response.final_content:
+                            self.conversation_history.append(
+                                {"role": "user", "content": prompt}
+                            )
+                            self.conversation_history.append(
+                                {"role": "assistant", "content": chained_response.final_content}
+                            )
+                            # Prevent unbounded history growth
+                            if len(self.conversation_history) > self._max_history_messages:
+                                self.conversation_history = self.conversation_history[
+                                    -self._max_history_messages:
+                                ]
+
+                        # Wrap ChainedResponse in APIResponse for backward compatibility
+                        return APIResponse(
+                            content=chained_response.final_content,
+                            model=f"chain:{','.join(s.model_key for s in chained_response.steps)}",
+                            provider="chained",
+                            usage={
+                                "input_tokens": sum(
+                                    s.usage.get("input_tokens", 0) for s in chained_response.steps
+                                ),
+                                "output_tokens": sum(
+                                    s.usage.get("output_tokens", 0) for s in chained_response.steps
+                                ),
+                            },
+                            latency_ms=chained_response.total_latency_ms,
+                            success=True,
+                            metadata={
+                                "chained": True,
+                                "steps": len(chained_response.steps),
+                                "step_models": [s.model_key for s in chained_response.steps],
+                                "total_cost": chained_response.total_cost,
+                                "routing_reasoning": chained_response.routing_reasoning,
+                            },
+                        )
+
+                    # Not chaining: use the router's selected model
+                    if routing.models:
+                        model_override = routing.models[0]
+
+            except Exception as e:
+                # Log but continue with standard model selection
+                logger.warning(f"LLM routing failed, falling back to standard selection: {e}")
 
         # Select model
         if model_override:
