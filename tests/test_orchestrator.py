@@ -22,15 +22,23 @@ from src.credentials import (
     EnvironmentBackend,
 )
 from src.orchestrator import (
+    SPECIALIZED_TASKS,
     AIOrchestrator,
     APIResponse,
     BaseProvider,
+    ChainedExecutor,
+    ChainedResponse,
+    ChainStep,
     InputValidator,
+    LLMRouter,
     ModelRegistry,
+    MoonshotProvider,
     RateLimiter,
     RetryHandler,
+    RoutingDecision,
     TaskClassifier,
     TaskType,
+    needs_llm_routing,
 )
 
 
@@ -474,6 +482,541 @@ class TestSecurityCompliance:
             sanitized = InputValidator.sanitize_for_logging(text)
             # Original key should not appear in sanitized output
             assert "1234567890abcdef" not in sanitized
+
+
+class TestMoonshotProvider:
+    """Tests for MoonshotProvider (Kimi K2 extended thinking models)"""
+
+    @pytest.fixture
+    def rate_limiter(self):
+        return RateLimiter()
+
+    def test_provider_name(self, rate_limiter):
+        """Should return 'moonshot' as provider name"""
+        provider = MoonshotProvider(rate_limiter)
+        assert provider.provider_name == "moonshot"
+
+    @pytest.mark.asyncio
+    async def test_initialize_missing_api_key(self, rate_limiter, monkeypatch):
+        """Should fail to initialize without API key"""
+        monkeypatch.setattr(orchestrator_module, "get_api_key", lambda x: None)
+        provider = MoonshotProvider(rate_limiter)
+        result = await provider.initialize()
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_initialize_success(self, rate_limiter, monkeypatch):
+        """Should initialize successfully with API key"""
+        monkeypatch.setattr(orchestrator_module, "get_api_key", lambda x: "test-key")
+        provider = MoonshotProvider(rate_limiter)
+        result = await provider.initialize()
+        assert result is True
+        assert provider._client is not None
+
+    @pytest.mark.asyncio
+    async def test_complete_uses_temperature_1_for_thinking_models(
+        self, rate_limiter, monkeypatch
+    ):
+        """Should use temperature=1.0 for thinking models"""
+        monkeypatch.setattr(orchestrator_module, "get_api_key", lambda x: "test-key")
+        provider = MoonshotProvider(rate_limiter)
+        await provider.initialize()
+
+        captured_json = {}
+
+        async def mock_post(url, json):
+            captured_json.update(json)
+
+            class MockResponse:
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    return {
+                        "choices": [{"message": {"content": "response"}}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                    }
+
+            return MockResponse()
+
+        provider._client.post = mock_post
+
+        await provider.complete(
+            messages=[{"role": "user", "content": "test"}],
+            model="kimi-k2-thinking",
+            temperature=0.5,  # This should be overridden to 1.0
+        )
+
+        assert captured_json["temperature"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_complete_formats_thinking_content(self, rate_limiter, monkeypatch):
+        """Should format response with [Thinking] and [Answer] sections"""
+        monkeypatch.setattr(orchestrator_module, "get_api_key", lambda x: "test-key")
+        provider = MoonshotProvider(rate_limiter)
+        await provider.initialize()
+
+        async def mock_post(url, json):
+            class MockResponse:
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    return {
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "Final answer here",
+                                    "reasoning_content": "Step by step reasoning",
+                                }
+                            }
+                        ],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                    }
+
+            return MockResponse()
+
+        provider._client.post = mock_post
+
+        response = await provider.complete(
+            messages=[{"role": "user", "content": "test"}],
+            model="kimi-k2-thinking",
+        )
+
+        assert response.success is True
+        assert "[Thinking]" in response.content
+        assert "[Answer]" in response.content
+        assert "Step by step reasoning" in response.content
+        assert "Final answer here" in response.content
+        assert response.metadata.get("has_reasoning") is True
+
+    @pytest.mark.asyncio
+    async def test_complete_without_thinking(self, rate_limiter, monkeypatch):
+        """Should return content without thinking sections for non-thinking models"""
+        monkeypatch.setattr(orchestrator_module, "get_api_key", lambda x: "test-key")
+        provider = MoonshotProvider(rate_limiter)
+        await provider.initialize()
+
+        async def mock_post(url, json):
+            class MockResponse:
+                def raise_for_status(self):
+                    pass
+
+                def json(self):
+                    return {
+                        "choices": [{"message": {"content": "Just the answer"}}],
+                        "usage": {"prompt_tokens": 10, "completion_tokens": 20},
+                    }
+
+            return MockResponse()
+
+        provider._client.post = mock_post
+
+        response = await provider.complete(
+            messages=[{"role": "user", "content": "test"}],
+            model="kimi-k2",
+        )
+
+        assert response.success is True
+        assert "[Thinking]" not in response.content
+        assert response.content == "Just the answer"
+        assert response.metadata.get("has_reasoning") is False
+
+    @pytest.mark.asyncio
+    async def test_complete_handles_error(self, rate_limiter, monkeypatch):
+        """Should return failed response on API error"""
+        monkeypatch.setattr(orchestrator_module, "get_api_key", lambda x: "test-key")
+        provider = MoonshotProvider(rate_limiter)
+        await provider.initialize()
+
+        async def mock_post(url, json):
+            raise Exception("API connection failed")
+
+        provider._client.post = mock_post
+
+        response = await provider.complete(
+            messages=[{"role": "user", "content": "test"}],
+            model="kimi-k2",
+        )
+
+        assert response.success is False
+        assert "API connection failed" in response.error
+
+
+class TestNeedsLLMRouting:
+    """Test the needs_llm_routing() helper function"""
+
+    def test_returns_false_with_no_specialized_tasks(self):
+        """Single general task should not trigger routing"""
+        task_types = [(TaskType.GENERAL_NLP, 0.8)]
+        assert needs_llm_routing(task_types) is False
+
+    def test_returns_false_with_one_specialized_task(self):
+        """Single specialized task should not trigger routing"""
+        task_types = [(TaskType.WEB_SEARCH, 0.9), (TaskType.GENERAL_NLP, 0.5)]
+        assert needs_llm_routing(task_types) is False
+
+    def test_returns_true_with_two_specialized_tasks(self):
+        """Two high-confidence specialized tasks should trigger routing"""
+        task_types = [
+            (TaskType.WEB_SEARCH, 0.85),
+            (TaskType.EXTENDED_THINKING, 0.75),
+        ]
+        assert needs_llm_routing(task_types) is True
+
+    def test_returns_true_with_code_and_multimodal(self):
+        """Code generation and multimodal should trigger routing"""
+        task_types = [
+            (TaskType.CODE_GENERATION, 0.9),
+            (TaskType.MULTIMODAL, 0.8),
+        ]
+        assert needs_llm_routing(task_types) is True
+
+    def test_ignores_low_confidence_specialized_tasks(self):
+        """Low confidence specialized tasks should not count"""
+        task_types = [
+            (TaskType.WEB_SEARCH, 0.5),  # Below 0.7 threshold
+            (TaskType.EXTENDED_THINKING, 0.6),  # Below 0.7 threshold
+        ]
+        assert needs_llm_routing(task_types) is False
+
+    def test_specialized_tasks_constants(self):
+        """Verify SPECIALIZED_TASKS contains expected types"""
+        assert TaskType.WEB_SEARCH in SPECIALIZED_TASKS
+        assert TaskType.EXTENDED_THINKING in SPECIALIZED_TASKS
+        assert TaskType.CODE_GENERATION in SPECIALIZED_TASKS
+        assert TaskType.MULTIMODAL in SPECIALIZED_TASKS
+        # General NLP should NOT be specialized
+        assert TaskType.GENERAL_NLP not in SPECIALIZED_TASKS
+
+
+class TestRoutingDecision:
+    """Test RoutingDecision dataclass"""
+
+    def test_dataclass_fields(self):
+        """Should have all required fields"""
+        decision = RoutingDecision(
+            models=["perplexity-sonar-pro", "kimi-k2-thinking"],
+            chain=True,
+            reasoning="Web search followed by deep analysis",
+            confidence=0.85,
+        )
+        assert decision.models == ["perplexity-sonar-pro", "kimi-k2-thinking"]
+        assert decision.chain is True
+        assert decision.reasoning == "Web search followed by deep analysis"
+        assert decision.confidence == 0.85
+
+    def test_single_model_no_chain(self):
+        """Should work with single model and no chaining"""
+        decision = RoutingDecision(
+            models=["claude-sonnet-4.5"],
+            chain=False,
+            reasoning="Simple query, single model sufficient",
+            confidence=0.9,
+        )
+        assert len(decision.models) == 1
+        assert decision.chain is False
+
+
+class TestLLMRouter:
+    """Test LLMRouter for smart multi-model routing"""
+
+    class FakeAnthropicProvider(BaseProvider):
+        """Fake Anthropic provider for testing LLMRouter"""
+
+        def __init__(self, rate_limiter, response_content: str):
+            super().__init__(rate_limiter)
+            self.response_content = response_content
+
+        @property
+        def provider_name(self) -> str:
+            return "anthropic"
+
+        async def initialize(self) -> bool:
+            return True
+
+        async def complete(self, messages, model, **kwargs):
+            return APIResponse(
+                content=self.response_content,
+                model=model,
+                provider="anthropic",
+                usage={"input_tokens": 100, "output_tokens": 50},
+                latency_ms=150,
+                success=True,
+            )
+
+    @pytest.fixture
+    def rate_limiter(self):
+        return RateLimiter()
+
+    @pytest.mark.asyncio
+    async def test_route_returns_valid_routing_decision(self, rate_limiter):
+        """Should parse valid JSON response into RoutingDecision"""
+        fake_response = '{"models": ["perplexity-sonar-pro"], "chain": false, "reasoning": "Web search needed"}'
+        provider = self.FakeAnthropicProvider(rate_limiter, fake_response)
+        router = LLMRouter(provider)
+
+        task_types = [(TaskType.WEB_SEARCH, 0.9), (TaskType.REASONING, 0.7)]
+        decision = await router.route("What's the latest news?", task_types)
+
+        assert isinstance(decision, RoutingDecision)
+        assert decision.models == ["perplexity-sonar-pro"]
+        assert decision.chain is False
+        assert decision.confidence == 0.85
+
+    @pytest.mark.asyncio
+    async def test_route_with_chaining(self, rate_limiter):
+        """Should correctly parse chained model response"""
+        fake_response = '{"models": ["perplexity-sonar-pro", "kimi-k2-thinking"], "chain": true, "reasoning": "Search then analyze"}'
+        provider = self.FakeAnthropicProvider(rate_limiter, fake_response)
+        router = LLMRouter(provider)
+
+        task_types = [(TaskType.WEB_SEARCH, 0.9), (TaskType.EXTENDED_THINKING, 0.8)]
+        decision = await router.route("Search X and think deeply", task_types)
+
+        assert len(decision.models) == 2
+        assert decision.chain is True
+
+    @pytest.mark.asyncio
+    async def test_route_handles_invalid_json(self, rate_limiter):
+        """Should fallback when JSON parsing fails"""
+        provider = self.FakeAnthropicProvider(rate_limiter, "not valid json")
+        router = LLMRouter(provider)
+
+        task_types = [(TaskType.WEB_SEARCH, 0.9)]
+        decision = await router.route("test prompt", task_types)
+
+        # Should fallback to default
+        assert isinstance(decision, RoutingDecision)
+        assert decision.confidence < 0.6  # Lower confidence on fallback
+
+    @pytest.mark.asyncio
+    async def test_route_handles_markdown_wrapped_json(self, rate_limiter):
+        """Should handle JSON wrapped in markdown code blocks"""
+        fake_response = '```json\n{"models": ["gpt-4o"], "chain": false, "reasoning": "General query"}\n```'
+        provider = self.FakeAnthropicProvider(rate_limiter, fake_response)
+        router = LLMRouter(provider)
+
+        task_types = [(TaskType.GENERAL_NLP, 0.8)]
+        decision = await router.route("Hello", task_types)
+
+        assert decision.models == ["gpt-4o"]
+
+    def test_prefilter_candidates_limits_to_10(self, rate_limiter):
+        """Should return at most 10 candidates"""
+        provider = self.FakeAnthropicProvider(rate_limiter, "")
+        router = LLMRouter(provider)
+
+        # Use broad tasks that match many models
+        task_types = [
+            (TaskType.GENERAL_NLP, 0.9),
+            (TaskType.CODE_GENERATION, 0.8),
+            (TaskType.REASONING, 0.7),
+        ]
+        candidates = router._prefilter_candidates(task_types)
+
+        assert len(candidates) <= 10
+
+    def test_prefilter_candidates_returns_matching_models(self, rate_limiter):
+        """Should return models that match detected task types"""
+        provider = self.FakeAnthropicProvider(rate_limiter, "")
+        router = LLMRouter(provider)
+
+        task_types = [(TaskType.WEB_SEARCH, 0.9)]
+        candidates = router._prefilter_candidates(task_types)
+
+        # All returned models should support WEB_SEARCH
+        for model in candidates:
+            assert TaskType.WEB_SEARCH in model.task_types
+
+
+class TestChainedExecutor:
+    """Test ChainedExecutor for sequential model execution"""
+
+    class FakeProvider(BaseProvider):
+        """Configurable fake provider"""
+
+        def __init__(self, rate_limiter, name: str, response: str, usage: dict | None = None):
+            super().__init__(rate_limiter)
+            self._name = name
+            self._response = response
+            self._usage = usage or {"input_tokens": 100, "output_tokens": 200}
+
+        @property
+        def provider_name(self) -> str:
+            return self._name
+
+        async def initialize(self) -> bool:
+            return True
+
+        async def complete(self, messages, model, **kwargs):
+            return APIResponse(
+                content=self._response,
+                model=model,
+                provider=self._name,
+                usage=self._usage,
+                latency_ms=500,
+                success=True,
+                metadata={},
+            )
+
+    @pytest.fixture
+    def rate_limiter(self):
+        return RateLimiter()
+
+    @pytest.mark.asyncio
+    async def test_execute_chain_single_step(self, rate_limiter):
+        """Single-step chain should work correctly"""
+        provider = self.FakeProvider(rate_limiter, "perplexity", "Search results here")
+
+        async def get_provider(name):
+            return provider
+
+        executor = ChainedExecutor(get_provider)
+        routing = RoutingDecision(
+            models=["perplexity-sonar-pro"],
+            chain=False,
+            reasoning="Just web search",
+            confidence=0.9,
+        )
+
+        response = await executor.execute_chain("test query", routing)
+
+        assert isinstance(response, ChainedResponse)
+        assert len(response.steps) == 1
+        assert "Search results" in response.final_content
+
+    @pytest.mark.asyncio
+    async def test_execute_chain_multi_step(self, rate_limiter):
+        """Multi-step chain should pass context between steps"""
+        call_count = 0
+        received_prompts = []
+
+        class TrackingProvider(BaseProvider):
+            @property
+            def provider_name(self) -> str:
+                return "test"
+
+            async def initialize(self) -> bool:
+                return True
+
+            async def complete(self, messages, model, **kwargs):
+                nonlocal call_count, received_prompts
+                call_count += 1
+                received_prompts.append(messages[-1]["content"])
+                return APIResponse(
+                    content=f"Response {call_count}",
+                    model=model,
+                    provider="test",
+                    usage={"input_tokens": 50, "output_tokens": 100},
+                    latency_ms=200,
+                    success=True,
+                    metadata={},
+                )
+
+        provider = TrackingProvider(rate_limiter)
+
+        async def get_provider(name):
+            return provider
+
+        executor = ChainedExecutor(get_provider)
+        routing = RoutingDecision(
+            models=["perplexity-sonar-pro", "kimi-k2-thinking"],
+            chain=True,
+            reasoning="Search then analyze",
+            confidence=0.85,
+        )
+
+        response = await executor.execute_chain("original question", routing)
+
+        assert call_count == 2
+        assert len(response.steps) == 2
+        # Second step should include first response in its prompt
+        assert "Response 1" in received_prompts[1]
+
+    @pytest.mark.asyncio
+    async def test_execute_chain_accumulates_cost(self, rate_limiter):
+        """Should accumulate cost across chain steps"""
+        # Use model with known pricing
+        provider = self.FakeProvider(
+            rate_limiter,
+            "perplexity",
+            "result",
+            {"input_tokens": 1000, "output_tokens": 500},
+        )
+
+        async def get_provider(name):
+            return provider
+
+        executor = ChainedExecutor(get_provider)
+        routing = RoutingDecision(
+            models=["perplexity-sonar-pro"],
+            chain=False,
+            reasoning="Test",
+            confidence=0.9,
+        )
+
+        response = await executor.execute_chain("test", routing)
+
+        # Cost should be calculated based on model pricing
+        assert response.total_cost > 0
+
+    @pytest.mark.asyncio
+    async def test_execute_chain_handles_missing_model(self, rate_limiter):
+        """Should skip invalid model keys gracefully"""
+        provider = self.FakeProvider(rate_limiter, "test", "result")
+
+        async def get_provider(name):
+            return provider
+
+        executor = ChainedExecutor(get_provider)
+        routing = RoutingDecision(
+            models=["nonexistent-model-xyz", "perplexity-sonar-pro"],
+            chain=True,
+            reasoning="Test",
+            confidence=0.9,
+        )
+
+        response = await executor.execute_chain("test", routing)
+
+        # Should complete with only the valid model
+        assert len(response.steps) == 1
+
+    @pytest.mark.asyncio
+    async def test_format_labeled_output(self, rate_limiter):
+        """Should format output with labeled sections"""
+        provider = self.FakeProvider(rate_limiter, "perplexity", "Web search results")
+
+        async def get_provider(name):
+            return provider
+
+        executor = ChainedExecutor(get_provider)
+        routing = RoutingDecision(
+            models=["perplexity-sonar-pro"],
+            chain=False,
+            reasoning="Test",
+            confidence=0.9,
+        )
+
+        response = await executor.execute_chain("test", routing)
+
+        # Should include label for perplexity (Web Search Results)
+        assert "[Web Search Results]" in response.final_content
+
+    def test_chain_step_dataclass(self, rate_limiter):
+        """ChainStep should store all required fields"""
+        step = ChainStep(
+            model_key="perplexity-sonar-pro",
+            model_name="Perplexity Sonar Pro",
+            content="Response content",
+            reasoning=None,
+            usage={"input_tokens": 100, "output_tokens": 50},
+            latency_ms=350.5,
+        )
+
+        assert step.model_key == "perplexity-sonar-pro"
+        assert step.reasoning is None
+        assert step.latency_ms == 350.5
 
 
 if __name__ == "__main__":
