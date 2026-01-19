@@ -302,6 +302,7 @@ class EnvironmentBackend(CredentialBackend):
         "deepseek": "DEEPSEEK_API_KEY",
         "groq": "GROQ_API_KEY",
         "ollama": "OLLAMA_API_KEY",
+        "moonshot": "MOONSHOT_API_KEY",
     }
 
     @property
@@ -480,6 +481,7 @@ def configure_credentials_interactive() -> None:
         ("groq", "Groq (Fast inference - Llama, Mixtral)"),
         ("perplexity", "Perplexity (Sonar - Web Search)"),
         ("deepseek", "DeepSeek (Chat, Reasoner)"),
+        ("moonshot", "Moonshot (Kimi K2 - Extended Thinking)"),
         ("ollama", "Ollama (Local models - no API key needed)"),
     ]
 

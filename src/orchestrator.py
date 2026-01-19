@@ -101,6 +101,7 @@ class TaskType(Enum):
     MULTIMODAL = auto()
     MATH = auto()
     SUMMARIZATION = auto()
+    EXTENDED_THINKING = auto()  # Deep reasoning with visible thought process
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,21 @@ class ModelCapability:
     supports_streaming: bool = True
     supports_functions: bool = False
     supports_vision: bool = False
+
+    # Enhanced metadata for smart routing
+    knowledge_cutoff: str = "unknown"
+    supports_web_search: bool = False
+    supports_extended_thinking: bool = False
+    reasoning_token_limit: int = 0  # Max tokens for thinking models (0 = N/A)
+    latency_class: str = "standard"  # "instant", "standard", "slow"
+    best_for: tuple[str, ...] = ()
+    avoid_for: tuple[str, ...] = ()
+
+    # For auto-update feature
+    model_family: str = ""
+    version_date: str = ""
+    is_preview: bool = False
+    successor_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1343,6 +1359,105 @@ class DeepSeekProvider(BaseProvider):
             )
 
 
+class MoonshotProvider(BaseProvider):
+    """
+    Moonshot AI provider for Kimi K2 models.
+
+    Supports both standard and thinking models. Thinking models return
+    reasoning_content in addition to the final answer.
+    """
+
+    @property
+    def provider_name(self) -> str:
+        return "moonshot"
+
+    async def initialize(self) -> bool:
+        api_key = get_api_key("moonshot")
+        if not api_key:
+            logger.error("Moonshot API key not configured")
+            return False
+
+        try:
+            # 25-minute timeout for thinking models
+            self._client = httpx.AsyncClient(
+                base_url="https://api.moonshot.ai/v1",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=httpx.Timeout(1500.0),  # 25 minutes for extended thinking
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize Moonshot client: {e}")
+            return False
+
+    async def complete(
+        self, messages: list[dict[str, Any]], model: str, **kwargs: Any
+    ) -> APIResponse:
+        if not self._client:
+            await self.initialize()
+        assert self._client is not None
+
+        start_time = time.time()
+
+        try:
+            await self.rate_limiter.check_and_wait(
+                self.provider_name,
+                kwargs.get("max_tokens", 1000),
+            )
+
+            # Thinking models recommend temperature=1.0
+            temperature = kwargs.get("temperature", 0.7)
+            if "thinking" in model:
+                temperature = 1.0
+
+            response = await self._client.post(
+                "/chat/completions",
+                json={
+                    "model": model,
+                    "messages": messages,
+                    "max_tokens": kwargs.get("max_tokens", 4096),
+                    "temperature": temperature,
+                },
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            latency = (time.time() - start_time) * 1000
+
+            message = data["choices"][0]["message"]
+            content = message.get("content", "")
+            reasoning = message.get("reasoning_content")
+
+            # Format with labeled sections for thinking models
+            if reasoning:
+                content = f"[Thinking]\n{reasoning}\n\n[Answer]\n{content}"
+
+            return APIResponse(
+                content=content,
+                model=model,
+                provider=self.provider_name,
+                usage={
+                    "input_tokens": data.get("usage", {}).get("prompt_tokens", 0),
+                    "output_tokens": data.get("usage", {}).get("completion_tokens", 0),
+                },
+                latency_ms=latency,
+                success=True,
+                metadata={"has_reasoning": reasoning is not None},
+            )
+        except Exception as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=str(e),
+            )
+
+
 class MLXProvider(BaseProvider):
     """
     MLX local model provider for Apple Silicon.
@@ -2053,6 +2168,39 @@ PROVIDER_CHARACTERISTICS: dict[str, ProviderCharacteristics] = {
         code_quality=0.88,  # Beats GPT-4o level
         objectivity=0.8,
     ),
+    "moonshot": ProviderCharacteristics(
+        provider="moonshot",
+        strengths=(
+            "extended thinking with visible reasoning traces",
+            "256K context window",
+            "strong math and complex analysis",
+            "cost-effective for deep reasoning tasks",
+        ),
+        weaknesses=(
+            "slower due to thinking process",
+            "newer platform, less established",
+            "limited to specific use cases",
+        ),
+        best_for=(
+            "complex multi-step reasoning",
+            "mathematical proofs and analysis",
+            "strategic planning",
+            "problems requiring step-by-step breakdown",
+        ),
+        avoid_for=(
+            "quick simple queries",
+            "time-sensitive applications",
+            "creative writing",
+        ),
+        contextual_understanding=0.85,
+        creativity_originality=0.65,
+        emotional_intelligence=0.5,
+        speed_efficiency=0.4,  # Slow due to thinking
+        knowledge_breadth=0.8,
+        reasoning_depth=0.95,  # Extended thinking focus
+        code_quality=0.85,
+        objectivity=0.85,
+    ),
 }
 
 
@@ -2104,6 +2252,14 @@ class TaskClassifier:
             r"\b(private|confidential|offline|local|sensitive)\b",
             r"\b(no cloud|internal|proprietary)\b",
         ],
+        TaskType.EXTENDED_THINKING: [
+            r"think.*(through|deeply|step.by.step|carefully)",
+            r"(reason|explain).*(your|the).*(thought|reasoning|logic)",
+            r"show.*your.*(work|thinking|reasoning)",
+            r"(analyze|consider).*all.*(aspects|angles|possibilities)",
+            r"work.*this.*out",
+            r"(let me think|think about this)",
+        ],
     }
 
     @classmethod
@@ -2129,6 +2285,38 @@ class TaskClassifier:
             scores[TaskType.GENERAL_NLP] = 0.5
 
         return sorted(scores.items(), key=lambda x: -x[1])
+
+
+@dataclass
+class RoutingDecision:
+    """Result of the routing analysis for multi-model selection."""
+
+    models: list[str]  # Ordered list of model registry keys
+    chain: bool  # True = sequential execution, False = use first model only
+    reasoning: str  # Why this routing was chosen
+    confidence: float  # 0.0-1.0 confidence in the routing decision
+
+
+# Specialized task types that may benefit from multi-model routing
+SPECIALIZED_TASKS = {
+    TaskType.WEB_SEARCH,
+    TaskType.EXTENDED_THINKING,
+    TaskType.CODE_GENERATION,
+    TaskType.MULTIMODAL,
+}
+
+
+def needs_llm_routing(task_types: list[tuple[TaskType, float]]) -> bool:
+    """
+    Determine if we need LLM-based routing.
+
+    Escalate to LLM router when 2+ specialized tasks are detected
+    at ≥0.7 confidence. This indicates a complex query that may
+    benefit from multi-model chaining.
+    """
+    high_confidence = [(t, c) for t, c in task_types if c >= 0.7]
+    specialized_count = sum(1 for t, _ in high_confidence if t in SPECIALIZED_TASKS)
+    return specialized_count >= 2
 
 
 class ModelRegistry:
@@ -2547,6 +2735,11 @@ class ModelRegistry:
             cost_per_1k_input=0.003,
             cost_per_1k_output=0.015,
             strengths=("web search", "citations", "real-time info"),
+            supports_web_search=True,
+            latency_class="standard",
+            knowledge_cutoff="real-time",
+            best_for=("research queries", "current events", "fact-checking"),
+            avoid_for=("creative writing", "code generation"),
         ),
         "perplexity-sonar": ModelCapability(
             name="Sonar",
@@ -2557,6 +2750,11 @@ class ModelRegistry:
             cost_per_1k_input=0.001,
             cost_per_1k_output=0.001,
             strengths=("web search", "cost-effective", "fast"),
+            supports_web_search=True,
+            latency_class="instant",
+            knowledge_cutoff="real-time",
+            best_for=("quick searches", "news", "simple queries"),
+            avoid_for=("complex reasoning", "code"),
         ),
         # DeepSeek Cloud Models
         "deepseek-chat": ModelCapability(
@@ -2586,6 +2784,44 @@ class ModelRegistry:
             cost_per_1k_input=0.00055,
             cost_per_1k_output=0.00219,
             strengths=("deep reasoning", "math", "problem-solving"),
+        ),
+        # Moonshot Models (Kimi K2 Extended Thinking)
+        "kimi-k2-thinking": ModelCapability(
+            name="Kimi K2 Thinking",
+            provider="moonshot",
+            model_id="kimi-k2-thinking",
+            task_types=(
+                TaskType.EXTENDED_THINKING,
+                TaskType.DEEP_REASONING,
+                TaskType.MATH,
+                TaskType.CODE_GENERATION,
+            ),
+            context_window=256000,
+            cost_per_1k_input=0.0006,
+            cost_per_1k_output=0.0025,
+            strengths=("extended thinking", "reasoning traces", "math", "complex analysis"),
+            supports_extended_thinking=True,
+            reasoning_token_limit=128000,
+            latency_class="slow",
+            knowledge_cutoff="2025-01",
+            best_for=("complex reasoning", "step-by-step analysis", "math proofs"),
+            avoid_for=("simple queries", "time-sensitive tasks"),
+        ),
+        "kimi-k2": ModelCapability(
+            name="Kimi K2",
+            provider="moonshot",
+            model_id="kimi-k2",
+            task_types=(
+                TaskType.REASONING,
+                TaskType.CODE_GENERATION,
+                TaskType.GENERAL_NLP,
+            ),
+            context_window=256000,
+            cost_per_1k_input=0.0003,
+            cost_per_1k_output=0.0012,
+            strengths=("reasoning", "coding", "general tasks"),
+            latency_class="standard",
+            knowledge_cutoff="2025-01",
         ),
         # MLX Local Models (Apple Silicon optimized)
         "mlx-llama-vision-11b": ModelCapability(
@@ -2735,6 +2971,348 @@ class ModelRegistry:
 
         # Sort by cost (cheapest first, unless it's local which is free)
         return sorted(suitable, key=lambda m: m.cost_per_1k_input)
+
+    @classmethod
+    def check_for_updates(cls) -> list[str]:
+        """Return list of models that have successors available."""
+        warnings = []
+        for key, model in cls.MODELS.items():
+            if model.successor_model and model.successor_model in cls.MODELS:
+                warnings.append(
+                    f"Model '{key}' has successor '{model.successor_model}' available. "
+                    f"Consider updating config."
+                )
+        return warnings
+
+    @classmethod
+    def log_update_suggestions(cls) -> None:
+        """Log warnings on startup for outdated models."""
+        for warning in cls.check_for_updates():
+            logger.warning(f"⚠️ {warning}")
+
+
+class LLMRouter:
+    """
+    Uses Claude Haiku with pre-filtered model candidates for smart routing.
+
+    Only invoked when needs_llm_routing() returns True, indicating
+    multiple specialized tasks that may benefit from model chaining.
+    """
+
+    ROUTER_SYSTEM_PROMPT = """You are a routing assistant that selects the best AI model(s) for a task.
+
+Given a user prompt and a list of candidate models with their capabilities, respond with a JSON object:
+{
+  "models": ["model-key-1", "model-key-2"],
+  "chain": true,
+  "reasoning": "Brief explanation of why these models"
+}
+
+Rules:
+- "models": Array of 1-2 model keys from the candidates, in execution order
+- "chain": true if models should run sequentially (output of first feeds into second), false for single model
+- Use chaining when: web search needs analysis, complex reasoning benefits from multiple perspectives
+- Prefer web search models first when current information is needed
+- Prefer thinking models when explicit reasoning traces are requested
+- Keep reasoning under 50 words
+
+Respond ONLY with valid JSON, no markdown or extra text."""
+
+    def __init__(self, anthropic_provider: "AnthropicProvider"):
+        self._anthropic = anthropic_provider
+
+    def _prefilter_candidates(
+        self, task_types: list[tuple[TaskType, float]]
+    ) -> list[ModelCapability]:
+        """Pre-filter to ~5-10 relevant candidates based on task types."""
+        candidates = []
+        all_tasks = {t for t, _ in task_types}
+
+        for model in ModelRegistry.MODELS.values():
+            # Include if model supports any detected task
+            if any(t in model.task_types for t in all_tasks):
+                candidates.append(model)
+
+        # Limit to top 10 candidates, prioritizing those with more task matches
+        def task_match_count(m: ModelCapability) -> int:
+            return sum(1 for t in all_tasks if t in m.task_types)
+
+        candidates.sort(key=task_match_count, reverse=True)
+        return candidates[:10]
+
+    def _format_candidates_json(self, candidates: list[ModelCapability]) -> str:
+        """Format candidates as compact JSON for the router prompt."""
+        formatted = []
+        for model in candidates:
+            # Find registry key for this model
+            key = None
+            for k, v in ModelRegistry.MODELS.items():
+                if v == model:
+                    key = k
+                    break
+
+            if key:
+                formatted.append(
+                    {
+                        "key": key,
+                        "name": model.name,
+                        "provider": model.provider,
+                        "strengths": list(model.strengths),
+                        "tasks": [t.name for t in model.task_types],
+                        "supports_web_search": model.supports_web_search,
+                        "supports_extended_thinking": model.supports_extended_thinking,
+                        "latency": model.latency_class,
+                    }
+                )
+        return json.dumps(formatted, indent=2)
+
+    async def route(
+        self,
+        prompt: str,
+        task_types: list[tuple[TaskType, float]],
+    ) -> RoutingDecision:
+        """Use Claude Haiku to determine optimal model routing."""
+        candidates = self._prefilter_candidates(task_types)
+        candidates_json = self._format_candidates_json(candidates)
+
+        # Truncate prompt to first 500 chars for efficiency
+        prompt_preview = prompt[:500] + ("..." if len(prompt) > 500 else "")
+
+        try:
+            response = await self._anthropic.complete(
+                messages=[
+                    {"role": "system", "content": self.ROUTER_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": f"Models:\n{candidates_json}\n\nPrompt: {prompt_preview}",
+                    },
+                ],
+                model="claude-3-5-haiku-latest",
+                max_tokens=150,
+                temperature=0.0,
+            )
+
+            if not response.success:
+                raise ValueError(f"Router call failed: {response.error}")
+
+            # Parse JSON response
+            content = response.content.strip()
+            # Remove markdown code blocks if present
+            if content.startswith("```"):
+                content = content.split("```")[1]
+                if content.startswith("json"):
+                    content = content[4:]
+            content = content.strip()
+
+            data = json.loads(content)
+
+            return RoutingDecision(
+                models=data.get("models", []),
+                chain=data.get("chain", False),
+                reasoning=data.get("reasoning", ""),
+                confidence=0.85,  # LLM-based routing has inherent uncertainty
+            )
+
+        except (json.JSONDecodeError, KeyError, ValueError) as e:
+            logger.warning(f"LLM router failed to parse response: {e}")
+            # Fall back to first candidate
+            if candidates:
+                for key, model in ModelRegistry.MODELS.items():
+                    if model == candidates[0]:
+                        return RoutingDecision(
+                            models=[key],
+                            chain=False,
+                            reasoning="Fallback to top candidate due to router error",
+                            confidence=0.5,
+                        )
+
+            return RoutingDecision(
+                models=["claude-sonnet-4.5"],  # Safe default
+                chain=False,
+                reasoning="Fallback to default model",
+                confidence=0.3,
+            )
+
+
+@dataclass
+class ChainStep:
+    """Result of a single step in a chained execution."""
+
+    model_key: str
+    model_name: str
+    content: str
+    reasoning: str | None  # For thinking models
+    usage: dict[str, int]
+    latency_ms: float
+
+
+@dataclass
+class ChainedResponse:
+    """Complete response from chained model execution."""
+
+    steps: list[ChainStep]
+    final_content: str  # Formatted with labeled sections
+    total_latency_ms: float
+    total_cost: float
+    routing_reasoning: str
+
+
+class ChainedExecutor:
+    """
+    Executes models sequentially, passing context between steps.
+
+    Used when LLMRouter determines that chaining would be beneficial
+    (e.g., web search → deep analysis).
+    """
+
+    # Labels for different model types in output
+    MODEL_TYPE_LABELS = {
+        "perplexity": "Web Search Results",
+        "moonshot": "Analysis",
+    }
+
+    def __init__(
+        self,
+        get_provider_func: "Callable[[str], Coroutine[Any, Any, BaseProvider | None]]",
+    ):
+        self._get_provider = get_provider_func
+
+    async def execute_chain(
+        self,
+        prompt: str,
+        routing: RoutingDecision,
+        system_prompt: str | None = None,
+        max_tokens: int = 4096,
+        temperature: float = 0.7,
+    ) -> ChainedResponse:
+        """Execute models in sequence, passing context between steps."""
+        steps: list[ChainStep] = []
+        accumulated_context = prompt
+        total_cost = 0.0
+
+        for i, model_key in enumerate(routing.models):
+            model = ModelRegistry.MODELS.get(model_key)
+            if not model:
+                logger.error(f"Unknown model in chain: {model_key}")
+                continue
+
+            provider = await self._get_provider(model.provider)
+            if not provider:
+                logger.error(f"Could not get provider for: {model.provider}")
+                continue
+
+            # Build prompt with previous context
+            if i > 0 and steps:
+                step_prompt = self._build_chain_prompt(
+                    original_prompt=prompt,
+                    previous_output=steps[-1].content,
+                    step_number=i + 1,
+                )
+            else:
+                step_prompt = accumulated_context
+
+            messages: list[dict[str, Any]] = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": step_prompt})
+
+            response = await provider.complete(
+                messages=messages,
+                model=model.model_id,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+            # Extract reasoning if present (for thinking models)
+            reasoning = None
+            content = response.content
+            if response.metadata.get("has_reasoning"):
+                # Content already formatted with [Thinking] and [Answer]
+                if "[Thinking]" in content and "[Answer]" in content:
+                    parts = content.split("[Answer]")
+                    reasoning = parts[0].replace("[Thinking]\n", "").strip()
+                    content = parts[1].strip() if len(parts) > 1 else content
+
+            step = ChainStep(
+                model_key=model_key,
+                model_name=model.name,
+                content=response.content,
+                reasoning=reasoning,
+                usage=response.usage,
+                latency_ms=response.latency_ms,
+            )
+            steps.append(step)
+
+            # Calculate cost
+            input_tokens = response.usage.get("input_tokens", 0)
+            output_tokens = response.usage.get("output_tokens", 0)
+            total_cost += (input_tokens / 1000) * model.cost_per_1k_input
+            total_cost += (output_tokens / 1000) * model.cost_per_1k_output
+
+            # Update context for next step
+            accumulated_context = response.content
+
+        return ChainedResponse(
+            steps=steps,
+            final_content=self._format_labeled_output(steps),
+            total_latency_ms=sum(s.latency_ms for s in steps),
+            total_cost=total_cost,
+            routing_reasoning=routing.reasoning,
+        )
+
+    def _build_chain_prompt(
+        self,
+        original_prompt: str,
+        previous_output: str,
+        step_number: int,
+    ) -> str:
+        """Build prompt for subsequent steps in the chain."""
+        return f"""Based on the following information:
+
+{previous_output}
+
+---
+
+Original question: {original_prompt}
+
+Please provide your analysis or response."""
+
+    def _format_labeled_output(self, steps: list[ChainStep]) -> str:
+        """Format chained output with labeled sections."""
+        parts = []
+
+        for i, step in enumerate(steps):
+            # Determine label based on provider or model characteristics
+            model = ModelRegistry.MODELS.get(step.model_key)
+            if model:
+                label = self.MODEL_TYPE_LABELS.get(
+                    model.provider, f"Step {i + 1}: {step.model_name}"
+                )
+
+                # Special handling for thinking models
+                if model.supports_extended_thinking and step.reasoning:
+                    parts.append(f"[{label} - Thinking]")
+                    parts.append(step.reasoning)
+                    parts.append("")
+                    parts.append(f"[{label} - Answer]")
+                    # Extract answer portion
+                    content = step.content
+                    if "[Answer]" in content:
+                        content = content.split("[Answer]")[-1].strip()
+                    parts.append(content)
+                else:
+                    parts.append(f"[{label}]")
+                    parts.append(step.content)
+            else:
+                parts.append(f"[Step {i + 1}]")
+                parts.append(step.content)
+
+            if i < len(steps) - 1:
+                parts.append("")
+                parts.append("---")
+                parts.append("")
+
+        return "\n".join(parts)
 
 
 class AIOrchestrator:
@@ -2927,6 +3505,8 @@ class AIOrchestrator:
                 provider = PerplexityProvider(self.rate_limiter)
             elif provider_name == "deepseek":
                 provider = DeepSeekProvider(self.rate_limiter)
+            elif provider_name == "moonshot":
+                provider = MoonshotProvider(self.rate_limiter)
             elif provider_name.startswith("mlx-"):
                 # Initialize specific MLX model
                 model_key = provider_name
@@ -3198,6 +3778,9 @@ class AIOrchestrator:
                 weights["contextual"] += 1.0
             elif task == TaskType.LOCAL_MODEL:
                 weights["speed"] += 1.0  # Local models prioritize speed
+            elif task == TaskType.EXTENDED_THINKING:
+                weights["reasoning"] += 3.5  # Prioritize deep reasoning
+                weights["contextual"] += 1.5
 
         return weights
 
