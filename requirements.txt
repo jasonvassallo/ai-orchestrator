@@ -15,6 +15,7 @@ anthropic>=0.18.0
 google-genai>=1.0.0
 mlx>=0.6.0
 mlx-lm>=0.29.1
+mlx-vlm>=0.3.9
 huggingface-hub>=0.34.0,<1.0
 # Optional: faster Hugging Face downloads used by src/manage_models.py
 hf-transfer>=0.1.9
