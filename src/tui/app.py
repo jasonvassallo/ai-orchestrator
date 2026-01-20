@@ -57,16 +57,21 @@ MODELS = [
 class MessageWidget(Static):
     """A chat message widget."""
 
-    def __init__(self, role: str, content: str, **kwargs: Any) -> None:
+    def __init__(self, role: str, content: str, model_info: str = "", **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.role = role
         self.text_content = content
+        self.model_info = model_info
 
     def compose(self) -> ComposeResult:
         role_label = "You" if self.role == "user" else "Assistant"
         role_style = "bold cyan" if self.role == "user" else "bold green"
 
-        yield Static(f"[{role_style}]{role_label}[/]")
+        header_text = f"[{role_style}]{role_label}[/]"
+        if self.model_info:
+            header_text += f" {self.model_info}"
+
+        yield Static(header_text)
         yield Markdown(self.text_content)
 
 
@@ -241,8 +246,10 @@ class ChatScreen(Screen):
 
         # Add user message
         container = self.query_one("#chat-container", ScrollableContainer)
-        user_msg = Static(
-            f"[bold cyan]You[/]\n\n{message}", classes="message user-message"
+        user_msg = MessageWidget(
+            role="user",
+            content=message,
+            classes="message user-message"
         )
         await container.mount(user_msg)
         container.scroll_end()
@@ -281,22 +288,33 @@ class ChatScreen(Screen):
                     model_override=model,
                     system_prompt=system_prompt,
                 )
-                response_text = response.content
-                model_used = f"[dim]({response.model})[/]"
+
+                if response.success:
+                    response_text = response.content
+                    model_used = f"[dim]({response.model})[/]"
+                    role_style = "message assistant-message"
+                else:
+                    response_text = f"❌ Error: {response.error}"
+                    model_used = "[dim](Error)[/]"
+                    role_style = "message assistant-message"  # Or separate error style
+
             else:
                 response_text = (
                     "Orchestrator not initialized. Please configure API keys.\n\n"
                     "Run `ai-configure` in terminal to set up your credentials."
                 )
                 model_used = ""
+                role_style = "message assistant-message"
 
             # Remove loading indicator
             loading.remove()
 
             # Add assistant message
-            assistant_msg = Static(
-                f"[bold green]Assistant[/] {model_used}\n\n{response_text}",
-                classes="message assistant-message",
+            assistant_msg = MessageWidget(
+                role="assistant",
+                content=response_text,
+                model_info=model_used,
+                classes=role_style
             )
             await container.mount(assistant_msg)
             container.scroll_end()
@@ -306,8 +324,10 @@ class ChatScreen(Screen):
 
         except Exception as e:
             loading.remove()
-            error_msg = Static(
-                f"[bold red]Error[/]\n\n{str(e)}", classes="message assistant-message"
+            error_msg = MessageWidget(
+                role="assistant",
+                content=f"Error: {str(e)}",
+                classes="message assistant-message"
             )
             await container.mount(error_msg)
             container.scroll_end()
