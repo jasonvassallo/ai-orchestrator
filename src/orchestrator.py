@@ -2220,7 +2220,7 @@ class TaskClassifier:
             r"\b(pandas|numpy|matplotlib|dataset)\b",
         ],
         TaskType.DEEP_REASONING: [
-            r"\b(prove|theorem|derive|mathematical|logic|reasoning|why|how)\b",
+            r"\b(prove|theorem|derive|mathematical|logic|reasoning)\b",
             r"\b(philosophy|ethics|moral|complex|multi-step|deduce)\b",
             r"\b(research|investigate|explore|comprehensive)\b",
         ],
