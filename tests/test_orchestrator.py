@@ -754,7 +754,7 @@ class TestLLMRouter:
         """Should parse valid JSON response into RoutingDecision"""
         fake_response = '{"models": ["perplexity-sonar-pro"], "chain": false, "reasoning": "Web search needed"}'
         provider = self.FakeAnthropicProvider(rate_limiter, fake_response)
-        router = LLMRouter(provider)
+        router = LLMRouter(provider, "gemini-3-flash-preview")
 
         task_types = [(TaskType.WEB_SEARCH, 0.9), (TaskType.REASONING, 0.7)]
         decision = await router.route("What's the latest news?", task_types)
@@ -769,7 +769,7 @@ class TestLLMRouter:
         """Should correctly parse chained model response"""
         fake_response = '{"models": ["perplexity-sonar-pro", "kimi-k2-thinking"], "chain": true, "reasoning": "Search then analyze"}'
         provider = self.FakeAnthropicProvider(rate_limiter, fake_response)
-        router = LLMRouter(provider)
+        router = LLMRouter(provider, "gemini-3-flash-preview")
 
         task_types = [(TaskType.WEB_SEARCH, 0.9), (TaskType.EXTENDED_THINKING, 0.8)]
         decision = await router.route("Search X and think deeply", task_types)
@@ -781,7 +781,7 @@ class TestLLMRouter:
     async def test_route_handles_invalid_json(self, rate_limiter):
         """Should fallback when JSON parsing fails"""
         provider = self.FakeAnthropicProvider(rate_limiter, "not valid json")
-        router = LLMRouter(provider)
+        router = LLMRouter(provider, "gemini-3-flash-preview")
 
         task_types = [(TaskType.WEB_SEARCH, 0.9)]
         decision = await router.route("test prompt", task_types)
@@ -795,7 +795,7 @@ class TestLLMRouter:
         """Should handle JSON wrapped in markdown code blocks"""
         fake_response = '```json\n{"models": ["gpt-4o"], "chain": false, "reasoning": "General query"}\n```'
         provider = self.FakeAnthropicProvider(rate_limiter, fake_response)
-        router = LLMRouter(provider)
+        router = LLMRouter(provider, "gemini-3-flash-preview")
 
         task_types = [(TaskType.GENERAL_NLP, 0.8)]
         decision = await router.route("Hello", task_types)
@@ -805,7 +805,7 @@ class TestLLMRouter:
     def test_prefilter_candidates_limits_to_10(self, rate_limiter):
         """Should return at most 10 candidates"""
         provider = self.FakeAnthropicProvider(rate_limiter, "")
-        router = LLMRouter(provider)
+        router = LLMRouter(provider, "gemini-3-flash-preview")
 
         # Use broad tasks that match many models
         task_types = [
@@ -820,7 +820,7 @@ class TestLLMRouter:
     def test_prefilter_candidates_returns_matching_models(self, rate_limiter):
         """Should return models that match detected task types"""
         provider = self.FakeAnthropicProvider(rate_limiter, "")
-        router = LLMRouter(provider)
+        router = LLMRouter(provider, "gemini-3-flash-preview")
 
         task_types = [(TaskType.WEB_SEARCH, 0.9)]
         candidates = router._prefilter_candidates(task_types)

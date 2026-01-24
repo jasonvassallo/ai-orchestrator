@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 # Local models that require disk space
 LOCAL_MODELS = {
-    "MLX Llama 3.1 8B": "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
+    "MLX Qwen3 4B": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
     "MLX Qwen 2.5 Coder 14B": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
     "MLX Llama 3.2 11B Vision": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
     "MLX Ministral 14B Reasoning": "mlx-community/Ministral-3-14B-Reasoning-2512-6bit",

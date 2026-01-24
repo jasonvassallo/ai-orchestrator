@@ -30,6 +30,21 @@
           "description": "Optimize for lower cost models when possible",
           "default": false
         },
+        "enableLLMRouting": {
+          "type": "boolean",
+          "description": "Enable LLM-based routing for model selection",
+          "default": false
+        },
+        "routerAllTasks": {
+          "type": "boolean",
+          "description": "Use the LLM router for every prompt (not just multi-task prompts)",
+          "default": false
+        },
+        "routingModel": {
+          "type": "string",
+          "description": "Model registry key (or raw model id) used for LLM routing",
+          "default": "gemini-3-flash-preview"
+        },
         "maxTokens": {
           "type": "integer",
           "description": "Default maximum tokens in response",

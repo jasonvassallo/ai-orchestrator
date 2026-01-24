@@ -206,7 +206,7 @@ class InputValidator:
     ]
 
     MAX_PROMPT_LENGTH = 500000  # 500k chars max
-    MAX_MESSAGES = 100
+    MAX_MESSAGES = 75
 
     @classmethod
     def validate_prompt(cls, prompt: str) -> tuple[bool, str]:
@@ -1545,7 +1545,7 @@ class MLXProvider(BaseProvider):
     def __init__(
         self,
         rate_limiter: RateLimiter,
-        model_path: str = "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
+        model_path: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit",
         is_vision_model: bool = False,
     ):
         super().__init__(rate_limiter)
@@ -1767,7 +1767,7 @@ class MLXProvider(BaseProvider):
                 vlm_generate_func: Callable[..., Any] = vlm_generate
                 apply_chat_template_func: Callable[..., Any] = vlm_apply_chat_template
 
-                # Extract images from messages (supports OpenAI-style multimodal format)
+                # Extract images and text parts
                 images: list[str] = []
                 text_parts: list[str] = []
 
@@ -1775,12 +1775,9 @@ class MLXProvider(BaseProvider):
                     content = msg.get("content", "")
                     if isinstance(content, list):
                         content_items = cast(list[Any], content)
-                        # Multimodal message with mixed content
                         for item in content_items:
                             if isinstance(item, dict):
-                                item_type = item.get("type")
-                                if item_type == "image_url":
-                                    # OpenAI format: {"type": "image_url", "image_url": {"url": "..."}}
+                                if item.get("type") == "image_url":
                                     image_url = item.get("image_url", {})
                                     url_value = (
                                         image_url.get("url", "")
@@ -1789,58 +1786,74 @@ class MLXProvider(BaseProvider):
                                     )
                                     url = url_value if isinstance(url_value, str) else ""
                                     if url.startswith("file://"):
-                                        images.append(url[7:])  # Strip file://
-                                    elif url.startswith("/"):
-                                        images.append(url)  # Local path
-                                    elif url.startswith("data:"):
-                                        # Base64 encoded - skip for now
-                                        logger.warning("Base64 images not yet supported")
-                                    else:
+                                        images.append(url[7:])
+                                    elif url:
                                         images.append(url)
-                                elif item_type == "image":
-                                    # Alternative format
-                                    if "path" in item:
-                                        images.append(item["path"])
-                                elif item_type == "text":
+                                elif item.get("type") == "text":
                                     text_parts.append(item.get("text", ""))
                             elif isinstance(item, str):
                                 text_parts.append(item)
                     elif isinstance(content, str):
                         text_parts.append(content)
 
-                prompt = " ".join(text_parts) if text_parts else "Describe this image."
+                if not images:
+                    logger.info(
+                        "No images detected for vision model; falling back to text-only generation"
+                    )
+                    prompt = "\n".join(text_parts).strip() or "Hello."
 
-                # Apply chat template for vision model
-                formatted_prompt = cast(
-                    str,
-                    apply_chat_template_func(
+                    def _generate_text():
+                        result = vlm_generate_func(
+                            self._model,
+                            self._processor,
+                            prompt,
+                            [],
+                            max_tokens=kwargs.get("max_tokens", 2048),
+                            verbose=False,
+                        )
+                        text = result.text if hasattr(result, "text") else str(result)
+                        return (
+                            text,
+                            getattr(result, "prompt_tokens", 0),
+                            getattr(result, "generation_tokens", 0),
+                        )
+
+                    (
+                        response_text,
+                        vision_input_tokens,
+                        vision_output_tokens,
+                    ) = await asyncio.to_thread(_generate_text)
+                else:
+                    prompt = " ".join(text_parts) if text_parts else "Describe this image."
+                    formatted_prompt = apply_chat_template_func(
                         self._processor,
                         self._config,
                         prompt,
-                        num_images=len(images) if images else 0,
-                    ),
-                )
-                image_arg: str | list[str] = images if images else []
-
-                # Run vision generation in a thread
-                def _generate_vision() -> tuple[str, int, int]:
-                    result = vlm_generate_func(
-                        self._model,
-                        self._processor,
-                        formatted_prompt,
-                        image_arg,
-                        max_tokens=kwargs.get("max_tokens", 2048),
-                        verbose=False,
+                        num_images=len(images),
                     )
-                    # mlx_vlm.generate returns GenerationResult with text and token counts
-                    text = result.text if hasattr(result, "text") else str(result)
-                    input_tokens = getattr(result, "prompt_tokens", 0)
-                    output_tokens = getattr(result, "generation_tokens", 0)
-                    return text, input_tokens, output_tokens
 
-                response_text, vision_input_tokens, vision_output_tokens = (
-                    await asyncio.to_thread(_generate_vision)
-                )
+                    def _generate_vision():
+                        result = vlm_generate_func(
+                            self._model,
+                            self._processor,
+                            formatted_prompt,
+                            images,
+                            max_tokens=kwargs.get("max_tokens", 2048),
+                            verbose=False,
+                        )
+                        text = result.text if hasattr(result, "text") else str(result)
+                        return (
+                            text,
+                            getattr(result, "prompt_tokens", 0),
+                            getattr(result, "generation_tokens", 0),
+                        )
+
+                    (
+                        response_text,
+                        vision_input_tokens,
+                        vision_output_tokens,
+                    ) = await asyncio.to_thread(_generate_vision)
+
             else:
                 # Text model generation using mlx_lm
                 from mlx_lm import generate
@@ -2974,6 +2987,31 @@ class ModelRegistry:
                 "private",
                 "efficient",
             ),
+            best_for=("fast coding", "daily use", "local coding"),
+            max_output_tokens=2048,
+            supports_streaming=True,
+        ),
+        "mlx-qwen2.5-coder-14b": ModelCapability(
+            name="MLX Qwen 2.5 Coder 14B",
+            provider="mlx",
+            model_id="mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+            task_types=(
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+                TaskType.LOCAL_MODEL,
+                TaskType.GENERAL_NLP,
+            ),
+            context_window=32768,
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            strengths=(
+                "complex coding",
+                "debugging",
+                "refactoring",
+                "local",
+                "private",
+            ),
+            best_for=("light coding", "medium coding", "debugging"),
             max_output_tokens=2048,
             supports_streaming=True,
         ),
@@ -3482,47 +3520,54 @@ class ModelRegistry:
 
 class LLMRouter:
     """
-    Uses Claude Haiku with pre-filtered model candidates for smart routing.
-
-    Only invoked when needs_llm_routing() returns True, indicating
-    multiple specialized tasks that may benefit from model chaining.
+    Uses a fast routing model to select the best model(s) for a prompt.
+    Determines task type, complexity, and optimal model chain.
     """
 
-    ROUTER_SYSTEM_PROMPT = """You are a routing assistant that selects the best AI model(s) for a task.
+    ROUTER_SYSTEM_PROMPT = """You are an expert AI router. Analyze the user request and select the best strategy.
 
-Given a user prompt and a list of candidate models with their capabilities, respond with a JSON object:
+Output JSON ONLY:
 {
+  "complexity": "simple" | "standard" | "complex",
+  "task_type": "general" | "code" | "reasoning" | "creative" | "search",
   "models": ["model-key-1", "model-key-2"],
-  "chain": true,
-  "reasoning": "Brief explanation of why these models"
+  "chain": boolean,
+  "reasoning": "brief explanation"
 }
 
-Rules:
-- "models": Array of 1-2 model keys from the candidates, in execution order
-- "chain": true if models should run sequentially (output of first feeds into second), false for single model
-- Use chaining when: web search needs analysis, complex reasoning benefits from multiple perspectives
-- Prefer web search models first when current information is needed
-- Prefer thinking models when explicit reasoning traces are requested
-- Keep reasoning under 50 words
+Routing Rules:
+1. COMPLEXITY:
+   - "simple": factual questions, basic definitions, simple greetings -> Use Local/Fast models.
+   - "standard": routine coding, emails, summaries -> Use Standard models (Sonnet, GPT-4o).
+   - "complex": architecture design, mathematical proofs, nuanced creative writing -> Use Reasoning/High-IQ models.
 
-Respond ONLY with valid JSON, no markdown or extra text."""
+2. MODEL SELECTION (coding preference):
+   - Simple/Low-Medium Code -> "mlx-qwen2.5-coder-14b" (local coding specialist)
+   - Medium Code/Bugfix -> "claude-sonnet-4.5"
+   - Most Complex Code/Architecture -> "claude-opus-4.5"
+   - Simple/Local -> "mlx-qwen3-4b", "gpt-4o-mini"
+   - Deep Reasoning/Math -> "kimi-k2-thinking", "o1"
+   - Web Search -> "perplexity-sonar-pro" or "gemini-2.0-flash"
 
-    def __init__(self, anthropic_provider: "AnthropicProvider"):
-        self._anthropic = anthropic_provider
+3. CHAINING:
+   - Set "chain": true ONLY if the task specifically requires gathering info (Search) then processing it (Reasoning).
+"""
+
+    def __init__(self, provider: BaseProvider, model_id: str = "gemini-3-flash-preview"):
+        self._provider = provider
+        self._model = model_id
 
     def _prefilter_candidates(
         self, task_types: list[tuple[TaskType, float]]
     ) -> list[ModelCapability]:
-        """Pre-filter to ~5-10 relevant candidates based on task types."""
+        """Pre-filter to ~10 relevant candidates based on task types."""
         candidates: list[ModelCapability] = []
         all_tasks = {t for t, _ in task_types}
 
         for model in ModelRegistry.MODELS.values():
-            # Include if model supports any detected task
             if any(t in model.task_types for t in all_tasks):
                 candidates.append(model)
 
-        # Limit to top 10 candidates, prioritizing those with more task matches
         def task_match_count(m: ModelCapability) -> int:
             return sum(1 for t in all_tasks if t in m.task_types)
 
@@ -3533,7 +3578,6 @@ Respond ONLY with valid JSON, no markdown or extra text."""
         """Format candidates as compact JSON for the router prompt."""
         formatted: list[dict[str, Any]] = []
         for model in candidates:
-            # Find registry key for this model
             key = None
             for k, v in ModelRegistry.MODELS.items():
                 if v == model:
@@ -3560,33 +3604,34 @@ Respond ONLY with valid JSON, no markdown or extra text."""
         prompt: str,
         task_types: list[tuple[TaskType, float]],
     ) -> RoutingDecision:
-        """Use Claude Haiku to determine optimal model routing."""
+        """Use the routing model to determine optimal model routing."""
         candidates = self._prefilter_candidates(task_types)
         candidates_json = self._format_candidates_json(candidates)
 
-        # Truncate prompt to first 500 chars for efficiency
-        prompt_preview = prompt[:500] + ("..." if len(prompt) > 500 else "")
+        # Truncate prompt for router efficiency
+        prompt_preview = prompt[:1000]
 
         try:
-            response = await self._anthropic.complete(
+            response = await self._provider.complete(
                 messages=[
                     {"role": "system", "content": self.ROUTER_SYSTEM_PROMPT},
                     {
                         "role": "user",
-                        "content": f"Models:\n{candidates_json}\n\nPrompt: {prompt_preview}",
+                        "content": (
+                            "Candidate models (choose only from these keys):\n"
+                            f"{candidates_json}\n\nRequest: {prompt_preview}"
+                        ),
                     },
                 ],
-                model="claude-3-5-haiku-latest",
-                max_tokens=150,
+                model=self._model,
+                max_tokens=256,
                 temperature=0.0,
             )
 
             if not response.success:
                 raise ValueError(f"Router call failed: {response.error}")
 
-            # Parse JSON response
             content = response.content.strip()
-            # Remove markdown code blocks if present
             if content.startswith("```"):
                 content = content.split("```")[1]
                 if content.startswith("json"):
@@ -3594,32 +3639,30 @@ Respond ONLY with valid JSON, no markdown or extra text."""
             content = content.strip()
 
             data = json.loads(content)
+            models = data.get("models", [])
+
+            if not models:
+                if data.get("complexity") == "complex":
+                    models = ["claude-opus-4.5"]
+                elif data.get("complexity") == "simple":
+                    models = ["mlx-qwen3-4b"]
+                else:
+                    models = ["claude-sonnet-4.5"]
 
             return RoutingDecision(
-                models=data.get("models", []),
+                models=models,
                 chain=data.get("chain", False),
-                reasoning=data.get("reasoning", ""),
-                confidence=0.85,  # LLM-based routing has inherent uncertainty
+                reasoning=data.get("reasoning", "Router-selected"),
+                confidence=0.85,
             )
 
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
-            logger.warning(f"LLM router failed to parse response: {e}")
-            # Fall back to first candidate
-            if candidates:
-                for key, model in ModelRegistry.MODELS.items():
-                    if model == candidates[0]:
-                        return RoutingDecision(
-                            models=[key],
-                            chain=False,
-                            reasoning="Fallback to top candidate due to router error",
-                            confidence=0.5,
-                        )
-
+        except Exception as e:
+            logger.warning(f"Smart router failed, falling back to static routing: {e}")
             return RoutingDecision(
-                models=["claude-sonnet-4.5"],  # Safe default
+                models=["claude-sonnet-4.5"],
                 chain=False,
-                reasoning="Fallback to default model",
-                confidence=0.3,
+                reasoning="Fallback (Router Error)",
+                confidence=0.5,
             )
 
 
@@ -3802,8 +3845,6 @@ Please provide your analysis or response."""
                 parts.append("")
 
         return "\n".join(parts)
-
-
 class AIOrchestrator:
     """
     Main AI Orchestrator that intelligently routes queries to the best model.
@@ -3822,13 +3863,15 @@ class AIOrchestrator:
         cost_optimize: bool | None = None,
         verbose: bool = False,
         enable_llm_routing: bool | None = None,
+        router_all_tasks: bool | None = None,
+        routing_model: str | None = None,
     ) -> None:
         self.verbose = verbose
 
         self.rate_limiter = RateLimiter()
         self.providers: dict[str, BaseProvider] = {}
         self.conversation_history: list[dict[str, Any]] = []
-        self._max_history_messages = 200
+        self._max_history_messages = 75
 
         # Load config first so we can use it for logging setup
         self._user_config = self._load_user_config()
@@ -3841,6 +3884,12 @@ class AIOrchestrator:
         )
         self.enable_llm_routing = self._resolve_bool_config(
             enable_llm_routing, defaults, "enableLLMRouting"
+        )
+        self.router_all_tasks = self._resolve_bool_config(
+            router_all_tasks, defaults, "routerAllTasks"
+        )
+        self.routing_model = self._resolve_str_config(
+            routing_model, defaults, "routingModel", "gemini-3-flash-preview"
         )
         self.local_provider_preference = self._resolve_local_provider_preference(
             defaults
@@ -3881,6 +3930,22 @@ class AIOrchestrator:
             return None
 
         return None
+
+    @staticmethod
+    def _resolve_str_config(
+        value: str | None, defaults: dict[str, Any], key: str, fallback: str
+    ) -> str:
+        if value is not None:
+            normalized = value.strip()
+            return normalized or fallback
+
+        config_value = defaults.get(key)
+        if isinstance(config_value, str):
+            normalized = config_value.strip()
+            if normalized:
+                return normalized
+
+        return fallback
 
     def _apply_local_provider_preference(
         self,
@@ -4049,6 +4114,7 @@ class AIOrchestrator:
     def select_model(
         self,
         task_types: list[tuple[TaskType, float]],
+        prompt: str | None = None,
     ) -> ModelCapability | None:
         """
         Select the best model for the given task types.
@@ -4065,6 +4131,7 @@ class AIOrchestrator:
 
         primary_task = task_types[0][0]
         all_tasks = [t[0] for t in task_types]
+        complexity = self._estimate_prompt_complexity(prompt) if prompt else 0.0
 
         # 1. Check User Config for Task Routing
         # This overrides standard selection if a valid route is defined
@@ -4094,6 +4161,17 @@ class AIOrchestrator:
                 logger.info(
                     f"Using custom routing for '{task_key}': {[m.name for m in candidates]}"
                 )
+
+        if self.prefer_local and candidates:
+            local_candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.provider in LOCAL_PROVIDERS
+            ]
+            if local_candidates:
+                candidates = local_candidates
+            else:
+                candidates = []
 
         # If no custom routing or no valid models found in routing, use standard selection
         if not candidates:
@@ -4200,7 +4278,11 @@ class AIOrchestrator:
                 if model.provider in LOCAL_PROVIDERS:
                     score += 5.0  # Significant bonus for local/private
 
-            # 6. User Priority Bonus
+            # 6. Code complexity bonus (favor strong coders for complex tasks)
+            if TaskType.CODE_GENERATION in all_tasks and complexity > 0:
+                score += self._code_complexity_bonus(model, complexity)
+
+            # 7. User Priority Bonus
             # Add bonus based on user priority config (default 50)
             specific_config = model_config.get(model.model_id)
             # Try lookup by registry key if needed
@@ -4216,7 +4298,7 @@ class AIOrchestrator:
                 priority_bonus = (priority - 50) / 10.0
                 score += priority_bonus
 
-            # 7. Prefer Vertex AI for Gemini 3 Pro/Flash Preview
+            # 8. Prefer Vertex AI for Gemini 3 Pro/Flash Preview
             if model.model_id in {"gemini-3-pro-preview", "gemini-3-flash-preview"}:
                 if model.provider == "vertex-ai":
                     score += 1.0
@@ -4288,6 +4370,89 @@ class AIOrchestrator:
 
         return weights
 
+    def _estimate_prompt_complexity(self, prompt: str) -> float:
+        """Estimate prompt complexity (0.0 = simple, 1.0 = complex)."""
+        if not prompt:
+            return 0.0
+
+        prompt_lower = prompt.lower()
+        score = 0.0
+
+        if len(prompt) > 1200:
+            score += 0.2
+        if len(prompt) > 3000:
+            score += 0.2
+
+        if prompt.count("```") >= 2:
+            score += 0.15
+
+        complexity_terms = (
+            "architecture",
+            "system design",
+            "distributed",
+            "concurrency",
+            "threading",
+            "async",
+            "performance",
+            "optimize",
+            "benchmark",
+            "profiling",
+            "scalability",
+            "migration",
+            "refactor",
+            "database",
+            "schema",
+            "security",
+            "oauth",
+            "authentication",
+            "authorization",
+            "kubernetes",
+            "microservice",
+            "monorepo",
+            "edge case",
+            "race condition",
+            "memory leak",
+            "stack trace",
+            "traceback",
+        )
+
+        for term in complexity_terms:
+            if term in prompt_lower:
+                score += 0.05
+
+        return min(score, 1.0)
+
+    def _code_complexity_bonus(self, model: ModelCapability, complexity: float) -> float:
+        """Bias toward fast or strong coding models based on complexity."""
+        name_lower = model.name.lower()
+        strengths_lower = " ".join(model.strengths).lower()
+
+        bonus = 0.0
+
+        if complexity >= 0.75:
+            if "claude opus 4.5" in name_lower:
+                bonus += 3.0
+            if "claude sonnet 4.5" in name_lower:
+                bonus += 1.0
+            if "qwen" in name_lower and "coder" in name_lower:
+                bonus -= 0.5
+        elif complexity >= 0.45:
+            if "claude sonnet 4.5" in name_lower:
+                bonus += 2.5
+            if "claude opus 4.5" in name_lower:
+                bonus += 1.0
+            if "qwen" in name_lower and "coder" in name_lower:
+                bonus += 0.5
+        else:
+            if "qwen" in name_lower and "coder" in name_lower:
+                bonus += 2.0
+            if "fast" in strengths_lower or "efficient" in strengths_lower:
+                bonus += 0.5
+            if "claude opus 4.5" in name_lower:
+                bonus -= 0.5
+
+        return bonus
+
     async def query(
         self,
         prompt: str,
@@ -4329,16 +4494,23 @@ class AIOrchestrator:
             logger.info(f"Classified task types: {task_types}")
 
         # Check for multi-model routing (only when no model override)
-        if (
+        should_route = (
             not model_override
             and self.enable_llm_routing
-            and needs_llm_routing(task_types)
-        ):
+            and (self.router_all_tasks or needs_llm_routing(task_types))
+        )
+        if should_route:
             try:
-                # Get Anthropic provider for routing
-                anthropic_provider = await self._get_provider("anthropic")
-                if isinstance(anthropic_provider, AnthropicProvider):
-                    router = LLMRouter(anthropic_provider)
+                routing_model = ModelRegistry.get_model(self.routing_model)
+                if routing_model:
+                    router_provider = await self._get_provider(routing_model.provider)
+                    router_model_id = routing_model.model_id
+                else:
+                    router_provider = await self._get_provider("google")
+                    router_model_id = self.routing_model
+
+                if router_provider:
+                    router = LLMRouter(router_provider, router_model_id)
                     routing = await router.route(prompt, task_types)
                     if self.verbose:
                         logger.info(
@@ -4398,10 +4570,8 @@ class AIOrchestrator:
                     # Not chaining: use the router's selected model
                     if routing.models:
                         model_override = routing.models[0]
-                elif anthropic_provider:
-                    logger.warning(
-                        "LLM routing skipped: Anthropic provider type mismatch."
-                    )
+                else:
+                    logger.warning("LLM routing skipped: routing provider unavailable.")
 
             except Exception as e:
                 # Log but continue with standard model selection
@@ -4421,7 +4591,7 @@ class AIOrchestrator:
                     error=f"Unknown model: '{model_override}'.",
                 )
         else:
-            model = self.select_model(task_types)
+            model = self.select_model(task_types, prompt=prompt)
 
         if not model:
             return APIResponse(

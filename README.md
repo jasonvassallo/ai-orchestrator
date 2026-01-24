@@ -148,7 +148,7 @@ python -m src.manage_models --yes
 python -m src.manage_models --yes --no-clean
 ```
 
-It includes MLX Llama 3.1 8B, MLX Qwen 2.5 Coder 14B, MLX Llama 3.2 11B Vision, MLX Ministral 14B Reasoning, plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
+It includes MLX Qwen3 4B, MLX Qwen 2.5 Coder 14B, MLX Llama 3.2 11B Vision, MLX Ministral 14B Reasoning, plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
 
 ## Mac Applications
 
@@ -310,7 +310,22 @@ python setup_app.py py2app
 | `deepseek-coder-v2` | Ollama | Complex code | Excellent coding, free |
 | `mlx-llama-vision-11b` | MLX | Apple Silicon, Vision | Vision, documents, charts, writing, 128K context |
 | `mlx-qwen3-4b` | MLX | Apple Silicon, Daily/Coding | Fast, efficient, local, private |
+| `mlx-qwen2.5-coder-14b` | MLX | Apple Silicon, Coding | Strong coding, debugging, refactoring, local |
 | `mlx-ministral-14b-reasoning` | MLX | Apple Silicon, Deep Thinking | Reasoning, math, STEM, local |
+
+### Smart Routing Configuration
+
+Enable LLM-based routing for every prompt (uses your routing model subscription):
+
+```json
+{
+  "defaults": {
+    "enableLLMRouting": true,
+    "routerAllTasks": true,
+    "routingModel": "gemini-3-flash-preview"
+  }
+}
+```
 
 ## API Keys Required
 

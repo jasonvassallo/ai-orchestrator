@@ -8,6 +8,9 @@
     "preferLocal": false,
     "localProvider": "mlx",
     "costOptimize": false,
+    "enableLLMRouting": true,
+    "routerAllTasks": true,
+    "routingModel": "gemini-3-flash-preview",
     "maxTokens": 4096,
     "temperature": 0.7,
     "timeout": 120
