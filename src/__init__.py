@@ -36,7 +36,25 @@ __version__ = "2.0.0"
 __author__ = "Jason Vassallo"
 
 from importlib import import_module
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .credentials import (
+        CredentialManager,
+        configure_credentials_interactive,
+        get_api_key,
+        get_credential_manager,
+        set_api_key,
+    )
+    from .orchestrator import (
+        AIOrchestrator,
+        APIResponse,
+        InputValidator,
+        ModelCapability,
+        ModelRegistry,
+        TaskClassifier,
+        TaskType,
+    )
 
 __all__ = [
     # Version

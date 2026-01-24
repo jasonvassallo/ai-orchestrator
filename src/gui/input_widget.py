@@ -35,6 +35,8 @@ except ImportError:
         "musicgen-small": {"description": "Fast, 300M params (recommended)"},
     }
 
+from ..orchestrator import LOCAL_PROVIDERS, ModelRegistry
+
 
 class ExpandingTextEdit(QTextEdit):
     """Text edit that expands with content up to a max height."""
@@ -313,28 +315,27 @@ class InputWidget(QFrame):
 
     messageSent = Signal(str, dict)  # message, settings
 
-    # Available models (subset for display)
-    MODELS = [
-        ("Auto (Best for Task)", None),
-        ("Claude Opus 4.5", "claude-opus-4.5"),
-        ("Claude Sonnet 4.5", "claude-sonnet-4.5"),
-        ("GPT-5 (Preview)", "gpt-5-preview"),
-        ("GPT-4.5 (Preview)", "gpt-4.5-preview"),
-        ("GPT-4o", "gpt-4o"),
-        ("o1 (Reasoning)", "o1"),
-        ("Gemini 3.0 Pro (Preview)", "gemini-3-pro"),
-        ("Gemini 3.0 Flash (Preview)", "gemini-3-flash"),
-        ("Gemini 2.0 Flash", "gemini-2.0-flash"),
-        ("DeepSeek Chat", "deepseek-chat"),
-        ("MLX Llama 3.2 11B Vision (Local)", "mlx-llama-vision-11b"),
-        ("MLX Qwen3 4B (Local)", "mlx-qwen3-4b"),
-        ("MLX Ministral 14B Reasoning (Local)", "mlx-ministral-14b-reasoning"),
-    ]
+    @staticmethod
+    def _build_model_options() -> list[tuple[str, str | None]]:
+        options: list[tuple[str, str | None]] = [("Auto (Best for Task)", None)]
+        models = sorted(
+            ModelRegistry.MODELS.items(),
+            key=lambda item: (item[1].provider, item[1].name),
+        )
+        for key, model in models:
+            tags = []
+            if model.provider in LOCAL_PROVIDERS:
+                tags.append("Local")
+            tags.append(model.provider)
+            label = f"{model.name} ({', '.join(tags)})"
+            options.append((label, key))
+        return options
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
         self.setObjectName("inputContainer")
         self._music_params: dict | None = None
+        self._model_options = self._build_model_options()
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -354,8 +355,8 @@ class InputWidget(QFrame):
         top_row.addWidget(model_label)
 
         self.model_combo = QComboBox()
-        for display_name, _ in self.MODELS:
-            self.model_combo.addItem(display_name)
+        for display_name, model_id in self._model_options:
+            self.model_combo.addItem(display_name, model_id)
         self.model_combo.setMinimumWidth(180)
         top_row.addWidget(self.model_combo)
 
@@ -440,8 +441,7 @@ class InputWidget(QFrame):
             return
 
         # Get selected model
-        model_idx = self.model_combo.currentIndex()
-        _, model_id = self.MODELS[model_idx]
+        model_id = self.model_combo.currentData()
 
         settings = {
             "model": model_id,

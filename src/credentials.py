@@ -9,6 +9,8 @@ Provides secure API key storage and retrieval using multiple backends:
 NEVER stores API keys in plain text or in code.
 """
 
+from __future__ import annotations
+
 import base64
 import getpass
 import hashlib
@@ -19,25 +21,32 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from cryptography.fernet import Fernet as CryptoFernet
 
 # Cryptography imports with fallback
 try:
-    from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives import hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
-    CRYPTO_AVAILABLE = True
+    from cryptography.fernet import Fernet as _Fernet
+    from cryptography.hazmat.primitives import hashes as _hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC as _PBKDF2HMAC
 except ImportError:
-    CRYPTO_AVAILABLE = False
+    _Fernet = None
+    _hashes = None
+    _PBKDF2HMAC = None
+
+CRYPTO_AVAILABLE = (
+    _Fernet is not None and _hashes is not None and _PBKDF2HMAC is not None
+)
 
 # Keyring import with fallback
 try:
-    import keyring
-
-    KEYRING_AVAILABLE = True
+    import keyring as _keyring
 except ImportError:
-    KEYRING_AVAILABLE = False
+    _keyring = None
+
+KEYRING_AVAILABLE = _keyring is not None
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +95,7 @@ class CredentialBackend(ABC):
         pass
 
     @abstractmethod
-    def list_providers(self) -> list:
+    def list_providers(self) -> list[str]:
         """List all stored providers"""
         pass
 
@@ -104,9 +113,10 @@ class KeyringBackend(CredentialBackend):
     def is_available(self) -> bool:
         if not KEYRING_AVAILABLE:
             return False
+        assert _keyring is not None
         try:
             # Test if keyring is functional
-            keyring.get_password(SERVICE_NAME, "__test__")
+            _keyring.get_password(SERVICE_NAME, "__test__")
             return True
         except Exception:
             return False
@@ -115,7 +125,8 @@ class KeyringBackend(CredentialBackend):
         if not self.is_available:
             return None
         try:
-            return keyring.get_password(SERVICE_NAME, provider)
+            assert _keyring is not None
+            return _keyring.get_password(SERVICE_NAME, provider)
         except Exception as e:
             logger.warning(f"Keyring get failed for {provider}: {e}")
             return None
@@ -124,7 +135,8 @@ class KeyringBackend(CredentialBackend):
         if not self.is_available:
             return False
         try:
-            keyring.set_password(SERVICE_NAME, provider, api_key)
+            assert _keyring is not None
+            _keyring.set_password(SERVICE_NAME, provider, api_key)
             logger.info(f"Stored credential in keyring for: {provider}")
             return True
         except Exception as e:
@@ -135,13 +147,14 @@ class KeyringBackend(CredentialBackend):
         if not self.is_available:
             return False
         try:
-            keyring.delete_password(SERVICE_NAME, provider)
+            assert _keyring is not None
+            _keyring.delete_password(SERVICE_NAME, provider)
             return True
         except Exception as e:
             logger.warning(f"Keyring delete failed for {provider}: {e}")
             return False
 
-    def list_providers(self) -> list:
+    def list_providers(self) -> list[str]:
         # Keyring doesn't support listing, return empty
         return []
 
@@ -150,7 +163,7 @@ class EncryptedFileBackend(CredentialBackend):
     """Encrypted file storage using machine-specific key derivation"""
 
     def __init__(self) -> None:
-        self._fernet: Fernet | None = None
+        self._fernet: CryptoFernet | None = None
         self._init_encryption()
 
     @property
@@ -159,7 +172,7 @@ class EncryptedFileBackend(CredentialBackend):
 
     def _get_machine_id(self) -> bytes:
         """Generate machine-specific identifier for key derivation"""
-        identifiers = []
+        identifiers: list[str] = []
 
         # Collect stable machine identifiers
         if sys.platform == "darwin":
@@ -204,16 +217,17 @@ class EncryptedFileBackend(CredentialBackend):
             return
 
         try:
+            assert _Fernet is not None and _hashes is not None and _PBKDF2HMAC is not None
             # Derive key from machine ID
             salt = b"ai_orchestrator_v1"  # Static salt for key derivation
-            kdf = PBKDF2HMAC(
-                algorithm=hashes.SHA256(),
+            kdf = _PBKDF2HMAC(
+                algorithm=_hashes.SHA256(),
                 length=32,
                 salt=salt,
                 iterations=480000,  # OWASP recommended minimum
             )
             key = base64.urlsafe_b64encode(kdf.derive(self._get_machine_id()))
-            self._fernet = Fernet(key)
+            self._fernet = _Fernet(key)
 
             # Ensure config directory exists
             CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -279,7 +293,7 @@ class EncryptedFileBackend(CredentialBackend):
             return self._save_credentials(creds)
         return True
 
-    def list_providers(self) -> list:
+    def list_providers(self) -> list[str]:
         return list(self._load_credentials().keys())
 
 
@@ -327,7 +341,7 @@ class EnvironmentBackend(CredentialBackend):
             del os.environ[env_var]
         return True
 
-    def list_providers(self) -> list:
+    def list_providers(self) -> list[str]:
         return [p for p, v in self.ENV_VAR_MAP.items() if os.environ.get(v)]
 
 
@@ -340,7 +354,7 @@ class CredentialManager:
     """
 
     def __init__(self) -> None:
-        self._backends = [
+        self._backends: list[CredentialBackend] = [
             KeyringBackend(),
             EncryptedFileBackend(),
             EnvironmentBackend(),
@@ -362,7 +376,7 @@ class CredentialManager:
                 "Install 'keyring' or 'cryptography' for secure storage."
             )
 
-    def get_credential(self, provider: str) -> APICredential | None:
+    def get_credential(self, provider: str, silent: bool = False) -> APICredential | None:
         """
         Retrieve API credential, checking backends in priority order.
         Results are cached for performance.
@@ -387,7 +401,8 @@ class CredentialManager:
                 )
                 return credential
 
-        logger.warning(f"No credential found for provider: {provider}")
+        if not silent:
+            logger.warning(f"No credential found for provider: {provider}")
         return None
 
     def set_credential(self, provider: str, api_key: str) -> bool:
@@ -424,17 +439,28 @@ class CredentialManager:
                 success = backend.delete(provider) and success
         return success
 
-    def list_configured_providers(self) -> list:
+    def list_configured_providers(
+        self, known_providers: list[str] | None = None
+    ) -> list[str]:
         """List all providers with stored credentials"""
-        providers = set()
+        providers: set[str] = set()
         for backend in self._backends:
             if backend.is_available:
                 providers.update(backend.list_providers())
+
+        # Check known providers against backends that might not support listing (like Keyring)
+        if known_providers:
+            for provider in known_providers:
+                if provider not in providers:
+                    # Check silently if it exists
+                    if self.get_credential(provider, silent=True):
+                        providers.add(provider)
+
         return sorted(providers)
 
     def get_api_key(self, provider: str) -> str | None:
         """Convenience method to get raw API key string"""
-        cred = self.get_credential(provider)
+        cred = self.get_credential(provider, silent=True)
         return cred.get_key() if cred else None
 
     def clear_cache(self) -> None:
@@ -485,8 +511,11 @@ def configure_credentials_interactive() -> None:
         ("ollama", "Ollama (Local models - no API key needed)"),
     ]
 
+    provider_ids = [p[0] for p in providers]
+
     for provider_id, provider_name in providers:
-        existing = manager.get_credential(provider_id)
+        # Check silently to avoid log spam
+        existing = manager.get_credential(provider_id, silent=True)
         status = "✓ configured" if existing else "✗ not set"
         print(f"\n{provider_name}: [{status}]")
 
@@ -505,9 +534,16 @@ def configure_credentials_interactive() -> None:
 
     print("\n" + "=" * 50)
     print("Configuration complete!")
-    print(f"Configured providers: {manager.list_configured_providers()}")
+    print(f"Configured providers: {manager.list_configured_providers(known_providers=provider_ids)}")
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    # Configure logging to be clean for CLI usage
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logging.basicConfig(level=logging.INFO, handlers=[handler])
+
+    # Suppress external library logs
+    logging.getLogger("keyring").setLevel(logging.WARNING)
+
     configure_credentials_interactive()

@@ -48,9 +48,11 @@ class AIMenuBarApp(rumps.App):
     def _init_orchestrator(self) -> None:
         """Initialize the orchestrator."""
         try:
-            from ..orchestrator import AIOrchestrator
+            from ..orchestrator import LOCAL_PROVIDERS, AIOrchestrator, ModelRegistry
 
             self.orchestrator = AIOrchestrator(verbose=False)
+            self._local_providers = LOCAL_PROVIDERS
+            self._model_registry = ModelRegistry
         except Exception as e:
             rumps.alert(
                 title="Orchestrator Error",
@@ -59,42 +61,11 @@ class AIMenuBarApp(rumps.App):
 
     def _build_menu(self) -> None:
         """Build the menu items."""
+        models_menu = self._build_models_menu()
         self.menu = [
             rumps.MenuItem("Quick Query...", callback=self.quick_query),
             None,  # Separator
-            rumps.MenuItem(
-                "Models",
-                [
-                    rumps.MenuItem(
-                        "Auto (Best)", callback=lambda _: self.set_model(None)
-                    ),
-                    None,
-                    rumps.MenuItem(
-                        "GPT-5 (Preview)",
-                        callback=lambda _: self.set_model("gpt-5-preview"),
-                    ),
-                    rumps.MenuItem(
-                        "Claude Opus 4.5",
-                        callback=lambda _: self.set_model("claude-opus-4.5"),
-                    ),
-                    rumps.MenuItem(
-                        "Gemini 3.0 Pro",
-                        callback=lambda _: self.set_model("gemini-3-pro"),
-                    ),
-                    rumps.MenuItem(
-                        "MLX Llama 3.2 11B Vision (Local)",
-                        callback=lambda _: self.set_model("mlx-llama-vision-11b"),
-                    ),
-                    rumps.MenuItem(
-                        "MLX Qwen3 4B (Local)",
-                        callback=lambda _: self.set_model("mlx-qwen3-4b"),
-                    ),
-                    rumps.MenuItem(
-                        "MLX Ministral 14B Reasoning (Local)",
-                        callback=lambda _: self.set_model("mlx-ministral-14b-reasoning"),
-                    ),
-                ],
-            ),
+            rumps.MenuItem("Models", models_menu),
             None,
             rumps.MenuItem("Open GUI App", callback=self.open_gui),
             rumps.MenuItem("Open Terminal UI", callback=self.open_tui),
@@ -105,6 +76,31 @@ class AIMenuBarApp(rumps.App):
         ]
 
         self.selected_model: str | None = None
+
+    def _build_models_menu(self) -> list[rumps.MenuItem | None]:
+        if not hasattr(self, "_model_registry"):
+            return [
+                rumps.MenuItem("Auto (Best)", callback=lambda _: self.set_model(None))
+            ]
+
+        models_by_provider: dict[str, list[tuple[str, str]]] = {}
+        for key, model in self._model_registry.MODELS.items():
+            models_by_provider.setdefault(model.provider, []).append((key, model.name))
+
+        menu_items: list[rumps.MenuItem | None] = [
+            rumps.MenuItem("Auto (Best)", callback=lambda _: self.set_model(None)),
+            None,
+        ]
+
+        for provider in sorted(models_by_provider):
+            entries = []
+            for key, name in sorted(models_by_provider[provider], key=lambda item: item[1]):
+                tag = "Local, " if provider in self._local_providers else ""
+                label = f"{name} ({tag}{provider})"
+                entries.append(rumps.MenuItem(label, callback=lambda _, m=key: self.set_model(m)))
+            menu_items.append(rumps.MenuItem(provider.title(), entries))
+
+        return menu_items
 
     def set_model(self, model: str | None) -> None:
         """Set the selected model."""

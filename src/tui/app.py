@@ -39,19 +39,27 @@ except ImportError:
     sys.exit(1)
 
 
-# Available models
-MODELS = [
-    ("Auto (Best for Task)", "auto"),
-    ("GPT-5 (Preview)", "gpt-5-preview"),
-    ("Claude Opus 4.5", "claude-opus-4.5"),
-    ("Claude Sonnet 4.5", "claude-sonnet-4.5"),
-    ("Gemini 3.0 Pro", "gemini-3-pro"),
-    ("Gemini 3.0 Flash", "gemini-3-flash"),
-    ("DeepSeek Chat", "deepseek-chat"),
-    ("MLX Llama 3.2 11B Vision (Local)", "mlx-llama-vision-11b"),
-    ("MLX Qwen3 4B (Local)", "mlx-qwen3-4b"),
-    ("MLX Ministral 14B Reasoning (Local)", "mlx-ministral-14b-reasoning"),
-]
+from ..orchestrator import LOCAL_PROVIDERS, ModelRegistry
+
+
+def _build_model_options() -> list[tuple[str, str]]:
+    options = [("Auto (Best for Task)", "auto")]
+    models = sorted(
+        ModelRegistry.MODELS.items(),
+        key=lambda item: (item[1].provider, item[1].name),
+    )
+    for key, model in models:
+        tags = []
+        if model.provider in LOCAL_PROVIDERS:
+            tags.append("Local")
+        tags.append(model.provider)
+        label = f"{model.name} ({', '.join(tags)})"
+        options.append((label, key))
+    return options
+
+
+# Available models (dynamic from registry)
+MODELS = _build_model_options()
 
 
 class MessageWidget(Static):

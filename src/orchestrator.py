@@ -29,7 +29,7 @@ from collections import deque
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
@@ -52,11 +52,11 @@ def format_http_error(exc: httpx.HTTPStatusError) -> str:
     """Format detailed error message from HTTP exception."""
     response = exc.response
     status_code = response.status_code
-    message = response.reason_phrase or str(exc)
-    retry_after = response.headers.get("Retry-After")
+    message: str = response.reason_phrase or str(exc)
+    retry_after: str | None = response.headers.get("Retry-After")
 
     try:
-        payload = response.json()
+        payload: dict[str, Any] | None = response.json()
     except ValueError:
         payload = None
 
@@ -64,18 +64,19 @@ def format_http_error(exc: httpx.HTTPStatusError) -> str:
         error_info = payload.get("error")
         if isinstance(error_info, dict):
             error_message = error_info.get("message")
-            if error_message:
+            if isinstance(error_message, str) and error_message:
                 message = error_message
             details = error_info.get("details", [])
             if isinstance(details, list):
                 for detail in details:
+                    if not isinstance(detail, dict):
+                        continue
                     if (
-                        isinstance(detail, dict)
-                        and detail.get("@type")
+                        detail.get("@type")
                         == "type.googleapis.com/google.rpc.RetryInfo"
                     ):
                         retry_delay = detail.get("retryDelay")
-                        if retry_delay:
+                        if isinstance(retry_delay, str) and retry_delay:
                             message = f"{message} Suggested retry after {retry_delay}."
                         break
 
@@ -398,6 +399,34 @@ class BaseProvider(ABC):
 class OpenAIProvider(BaseProvider):
     """OpenAI API provider"""
 
+    @staticmethod
+    def _uses_max_completion_tokens(model: str) -> bool:
+        normalized = model.strip().lower()
+        return normalized.startswith(("o1", "o3", "o4", "gpt-5"))
+
+    @staticmethod
+    def _uses_responses_api(model: str) -> bool:
+        normalized = model.strip().lower()
+        return normalized.startswith("gpt-5")
+
+    @staticmethod
+    def _omit_temperature(model: str) -> bool:
+        normalized = model.strip().lower()
+        return normalized.startswith(("o1", "o3", "o4", "gpt-5"))
+
+    @staticmethod
+    def _split_system_messages(
+        messages: list[dict[str, Any]],
+    ) -> tuple[str | None, list[dict[str, Any]]]:
+        system_message = None
+        input_messages: list[dict[str, Any]] = []
+        for msg in messages:
+            if msg.get("role") == "system" and system_message is None:
+                system_message = msg.get("content", "")
+            else:
+                input_messages.append(msg)
+        return system_message, input_messages
+
     @property
     def provider_name(self) -> str:
         return "openai"
@@ -425,19 +454,55 @@ class OpenAIProvider(BaseProvider):
         assert self._client is not None
 
         start_time = time.time()
-
         try:
             await self.rate_limiter.check_and_wait(
                 self.provider_name,
                 kwargs.get("max_tokens", 1000),
             )
 
-            response = await self._client.chat.completions.create(
-                model=model,
-                messages=messages,
-                max_tokens=kwargs.get("max_tokens", 4096),
-                temperature=kwargs.get("temperature", 0.7),
-            )
+            max_tokens = kwargs.get("max_tokens", 4096)
+            if self._uses_responses_api(model):
+                system_message, input_messages = self._split_system_messages(messages)
+                payload: dict[str, Any] = {
+                    "model": model,
+                    "input": input_messages,
+                    "max_output_tokens": max_tokens,
+                }
+                if system_message:
+                    payload["instructions"] = system_message
+                if not self._omit_temperature(model):
+                    payload["temperature"] = kwargs.get("temperature", 0.7)
+
+                response = await self._client.responses.create(**payload)
+                latency = (time.time() - start_time) * 1000
+                usage = {}
+                if response.usage:
+                    usage = {
+                        "input_tokens": response.usage.input_tokens,
+                        "output_tokens": response.usage.output_tokens,
+                    }
+
+                return APIResponse(
+                    content=response.output_text or "",
+                    model=model,
+                    provider=self.provider_name,
+                    usage=usage,
+                    latency_ms=latency,
+                    success=True,
+                )
+
+            payload = {
+                "model": model,
+                "messages": messages,
+            }
+            if self._uses_max_completion_tokens(model):
+                payload["max_completion_tokens"] = max_tokens
+            else:
+                payload["max_tokens"] = max_tokens
+            if not self._omit_temperature(model):
+                payload["temperature"] = kwargs.get("temperature", 0.7)
+
+            response = await self._client.chat.completions.create(**payload)
 
             latency = (time.time() - start_time) * 1000
 
@@ -584,7 +649,7 @@ class GoogleProvider(BaseProvider):
             await self.rate_limiter.check_and_wait(self.provider_name, 1000)
 
             # Convert messages to Gemini format
-            contents = []
+            contents: list[dict[str, Any]] = []
             for msg in messages:
                 if msg["role"] == "system":
                     contents.append(
@@ -665,17 +730,25 @@ class VertexAIProvider(BaseProvider):
 
             import google.auth
 
+            creds: Any
+            project: str | None
+            load_credentials_from_file: Callable[..., tuple[Any, Any]] = (
+                google.auth.load_credentials_from_file
+            )
+            default_credentials: Callable[..., tuple[Any, Any]] = google.auth.default
+
             # Get credentials from environment or default
             credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
 
             if credentials_path and os.path.exists(credentials_path):
                 try:
-                    creds, project = google.auth.load_credentials_from_file(
+                    creds, project = load_credentials_from_file(
                         credentials_path,
                         scopes=["https://www.googleapis.com/auth/cloud-platform"],
                     )
+                    project = project if isinstance(project, str) else None
                     self._credentials = creds
-                    if not self.project_id and project:
+                    if not self.project_id and project is not None:
                         self.project_id = project
                     logger.info(f"Loaded Vertex AI credentials from {credentials_path}")
                 except Exception as e:
@@ -684,20 +757,22 @@ class VertexAIProvider(BaseProvider):
                         credentials_path,
                         e,
                     )
-                    creds, project = google.auth.default(
+                    creds, project = default_credentials(
                         scopes=["https://www.googleapis.com/auth/cloud-platform"]
                     )
+                    project = project if isinstance(project, str) else None
                     self._credentials = creds
-                    if not self.project_id:
+                    if not self.project_id and project is not None:
                         self.project_id = project
                     logger.info("Using application default credentials for Vertex AI")
             else:
                 # Try application default credentials
-                creds, project = google.auth.default(
+                creds, project = default_credentials(
                     scopes=["https://www.googleapis.com/auth/cloud-platform"]
                 )
+                project = project if isinstance(project, str) else None
                 self._credentials = creds
-                if not self.project_id:
+                if not self.project_id and project is not None:
                     self.project_id = project
                 logger.info("Using application default credentials for Vertex AI")
 
@@ -738,7 +813,8 @@ class VertexAIProvider(BaseProvider):
 
         assert self._credentials is not None
         if not self._credentials.valid:
-            await asyncio.to_thread(self._credentials.refresh, Request())
+            refresh_func: Callable[[Request], Any] = self._credentials.refresh
+            await asyncio.to_thread(refresh_func, Request())
 
         return self._credentials.token  # type: ignore
 
@@ -1492,7 +1568,14 @@ class MLXProvider(BaseProvider):
             from pathlib import Path
 
             import mlx.core as mx
-            from huggingface_hub import snapshot_download, try_to_load_from_cache
+            from huggingface_hub import (
+                snapshot_download as hf_snapshot_download,
+            )
+            from huggingface_hub import (
+                try_to_load_from_cache,
+            )
+
+            snapshot_download: Callable[..., str] = hf_snapshot_download
 
             def _find_local_snapshot_dir(repo_id: str) -> str | None:
                 """Search common HF cache roots for a snapshot dir with safetensors."""
@@ -1595,9 +1678,12 @@ class MLXProvider(BaseProvider):
                 from mlx_vlm import load as vlm_load
                 from mlx_vlm.utils import load_config
 
+                vlm_load_func: Callable[..., tuple[Any, Any]] = vlm_load
+                load_config_func: Callable[..., dict[str, Any]] = load_config
+
                 def _load_vision_model() -> tuple[Any, Any, Any]:
-                    model, processor = vlm_load(self.model_path)
-                    config = load_config(self.model_path)
+                    model, processor = vlm_load_func(self.model_path)
+                    config = load_config_func(self.model_path)
                     return model, processor, config
 
                 result = await asyncio.to_thread(_load_vision_model)
@@ -1610,7 +1696,7 @@ class MLXProvider(BaseProvider):
                 def _load_model() -> Any:
                     return load(self.model_path)
 
-                result = await asyncio.to_thread(_load_model)
+                result: Any = await asyncio.to_thread(_load_model)
 
                 if isinstance(result, tuple) and len(result) >= 2:
                     self._model = result[0]
@@ -1669,10 +1755,17 @@ class MLXProvider(BaseProvider):
         start_time = time.time()
 
         try:
+            vision_input_tokens = 0
+            vision_output_tokens = 0
             if self._is_vision_model:
                 # Vision model generation using mlx_vlm
                 from mlx_vlm import generate as vlm_generate
-                from mlx_vlm.prompt_utils import apply_chat_template
+                from mlx_vlm.prompt_utils import (
+                    apply_chat_template as vlm_apply_chat_template,
+                )
+
+                vlm_generate_func: Callable[..., Any] = vlm_generate
+                apply_chat_template_func: Callable[..., Any] = vlm_apply_chat_template
 
                 # Extract images from messages (supports OpenAI-style multimodal format)
                 images: list[str] = []
@@ -1681,12 +1774,20 @@ class MLXProvider(BaseProvider):
                 for msg in messages:
                     content = msg.get("content", "")
                     if isinstance(content, list):
+                        content_items = cast(list[Any], content)
                         # Multimodal message with mixed content
-                        for item in content:
+                        for item in content_items:
                             if isinstance(item, dict):
-                                if item.get("type") == "image_url":
+                                item_type = item.get("type")
+                                if item_type == "image_url":
                                     # OpenAI format: {"type": "image_url", "image_url": {"url": "..."}}
-                                    url = item.get("image_url", {}).get("url", "")
+                                    image_url = item.get("image_url", {})
+                                    url_value = (
+                                        image_url.get("url", "")
+                                        if isinstance(image_url, dict)
+                                        else image_url
+                                    )
+                                    url = url_value if isinstance(url_value, str) else ""
                                     if url.startswith("file://"):
                                         images.append(url[7:])  # Strip file://
                                     elif url.startswith("/"):
@@ -1696,11 +1797,11 @@ class MLXProvider(BaseProvider):
                                         logger.warning("Base64 images not yet supported")
                                     else:
                                         images.append(url)
-                                elif item.get("type") == "image":
+                                elif item_type == "image":
                                     # Alternative format
                                     if "path" in item:
                                         images.append(item["path"])
-                                elif item.get("type") == "text":
+                                elif item_type == "text":
                                     text_parts.append(item.get("text", ""))
                             elif isinstance(item, str):
                                 text_parts.append(item)
@@ -1710,20 +1811,24 @@ class MLXProvider(BaseProvider):
                 prompt = " ".join(text_parts) if text_parts else "Describe this image."
 
                 # Apply chat template for vision model
-                formatted_prompt = apply_chat_template(
-                    self._processor,
-                    self._config,
-                    prompt,
-                    num_images=len(images) if images else 0,
+                formatted_prompt = cast(
+                    str,
+                    apply_chat_template_func(
+                        self._processor,
+                        self._config,
+                        prompt,
+                        num_images=len(images) if images else 0,
+                    ),
                 )
+                image_arg: str | list[str] = images if images else []
 
                 # Run vision generation in a thread
                 def _generate_vision() -> tuple[str, int, int]:
-                    result = vlm_generate(
+                    result = vlm_generate_func(
                         self._model,
                         self._processor,
                         formatted_prompt,
-                        images if images else None,
+                        image_arg,
                         max_tokens=kwargs.get("max_tokens", 2048),
                         verbose=False,
                     )
@@ -1742,15 +1847,20 @@ class MLXProvider(BaseProvider):
 
                 # Convert messages to prompt using tokenizer's template if available
                 if hasattr(self._tokenizer, "apply_chat_template"):
-                    prompt = self._tokenizer.apply_chat_template(
-                        messages, tokenize=False, add_generation_prompt=True
+                    prompt = cast(
+                        str,
+                        self._tokenizer.apply_chat_template(
+                            messages, tokenize=False, add_generation_prompt=True
+                        ),
                     )
                 else:
                     prompt = self._format_messages(messages)
 
+                generate_func: Callable[..., str] = generate
+
                 # Run generation in a thread to avoid blocking the event loop
                 response_text = await asyncio.to_thread(
-                    generate,
+                    generate_func,
                     self._model,
                     self._tokenizer,
                     prompt=prompt,
@@ -1793,14 +1903,15 @@ class MLXProvider(BaseProvider):
 
     def _format_messages(self, messages: list[dict[str, Any]]) -> str:
         """Convert chat messages to a single prompt string (fallback)"""
-        parts = []
+        parts: list[str] = []
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if isinstance(content, list):
                 # Handle multimodal messages - extract text only
-                text_parts = []
-                for item in content:
+                text_parts: list[str] = []
+                content_items = cast(list[Any], content)
+                for item in content_items:
                     if isinstance(item, dict) and item.get("type") == "text":
                         text_parts.append(item.get("text", ""))
                     elif isinstance(item, str):
@@ -2224,6 +2335,10 @@ class TaskClassifier:
             r"\b(philosophy|ethics|moral|complex|multi-step|deduce)\b",
             r"\b(research|investigate|explore|comprehensive)\b",
         ],
+        TaskType.REASONING: [
+            r"\b(why|how|explain|reason|cause|because)\b",
+            r"\b(implication|implications|analyze|analysis)\b",
+        ],
         TaskType.CREATIVE_WRITING: [
             r"\b(write|story|poem|essay|creative|fiction|narrative)\b",
             r"\b(blog|article|content|copywriting|marketing)\b",
@@ -2352,21 +2467,6 @@ class ModelRegistry:
             cost_per_1k_output=0.0006,
             strengths=("cost-effective", "fast", "good for simple tasks"),
             supports_functions=True,
-        ),
-        # GPT-5 Preview / Placeholder (mapped to o1-preview or latest available)
-        "gpt-5-preview": ModelCapability(
-            name="GPT-5 (Preview)",
-            provider="openai",
-            model_id="o1",  # Mapping to o1 as closest to "next-gen" currently available
-            task_types=(
-                TaskType.DEEP_REASONING,
-                TaskType.GENERAL_NLP,
-                TaskType.CODE_GENERATION,
-            ),
-            context_window=200000,
-            cost_per_1k_input=0.015,
-            cost_per_1k_output=0.06,
-            strengths=("next-gen reasoning", "complex tasks", "preview capability"),
         ),
         "gpt-4.5-preview": ModelCapability(
             name="GPT-4.5 (Preview)",
@@ -2904,6 +3004,27 @@ class ModelRegistry:
         # New Models (January 2026) - HIGH PRIORITY
         # =====================================================================
         # OpenAI GPT-5.2 Series
+        "gpt-5.2": ModelCapability(
+            name="GPT-5.2",
+            provider="openai",
+            model_id="gpt-5.2",
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+                TaskType.CREATIVE_WRITING,
+                TaskType.MULTIMODAL,
+            ),
+            context_window=200000,
+            cost_per_1k_input=0.008,
+            cost_per_1k_output=0.032,
+            strengths=("general purpose", "multimodal", "coding", "reasoning"),
+            supports_vision=True,
+            supports_functions=True,
+            latency_class="standard",
+            knowledge_cutoff="2025-10",
+            best_for=("complex tasks", "professional work", "multimodal analysis"),
+        ),
         "gpt-5.2-instant": ModelCapability(
             name="GPT-5.2 Instant",
             provider="openai",
@@ -2946,6 +3067,27 @@ class ModelRegistry:
             name="GPT-5.2 Pro",
             provider="openai",
             model_id="gpt-5.2-pro",
+            task_types=(
+                TaskType.GENERAL_NLP,
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+                TaskType.CREATIVE_WRITING,
+                TaskType.MULTIMODAL,
+            ),
+            context_window=256000,
+            cost_per_1k_input=0.008,
+            cost_per_1k_output=0.032,
+            strengths=("most capable GPT", "multimodal", "coding", "reasoning"),
+            supports_vision=True,
+            supports_functions=True,
+            latency_class="standard",
+            knowledge_cutoff="2025-10",
+            best_for=("complex tasks", "professional work", "multimodal analysis"),
+        ),
+        "gpt-5-pro": ModelCapability(
+            name="GPT-5 Pro",
+            provider="openai",
+            model_id="gpt-5-pro",
             task_types=(
                 TaskType.GENERAL_NLP,
                 TaskType.CODE_GENERATION,
@@ -3309,7 +3451,7 @@ class ModelRegistry:
         require_local: bool = False,
     ) -> list[ModelCapability]:
         """Get models suitable for a task type"""
-        suitable = []
+        suitable: list[ModelCapability] = []
         for model in cls.MODELS.values():
             if task_type in model.task_types:
                 if require_local and model.provider not in LOCAL_PROVIDERS:
@@ -3322,7 +3464,7 @@ class ModelRegistry:
     @classmethod
     def check_for_updates(cls) -> list[str]:
         """Return list of models that have successors available."""
-        warnings = []
+        warnings: list[str] = []
         for key, model in cls.MODELS.items():
             if model.successor_model and model.successor_model in cls.MODELS:
                 warnings.append(
@@ -3372,7 +3514,7 @@ Respond ONLY with valid JSON, no markdown or extra text."""
         self, task_types: list[tuple[TaskType, float]]
     ) -> list[ModelCapability]:
         """Pre-filter to ~5-10 relevant candidates based on task types."""
-        candidates = []
+        candidates: list[ModelCapability] = []
         all_tasks = {t for t, _ in task_types}
 
         for model in ModelRegistry.MODELS.values():
@@ -3389,7 +3531,7 @@ Respond ONLY with valid JSON, no markdown or extra text."""
 
     def _format_candidates_json(self, candidates: list[ModelCapability]) -> str:
         """Format candidates as compact JSON for the router prompt."""
-        formatted = []
+        formatted: list[dict[str, Any]] = []
         for model in candidates:
             # Find registry key for this model
             key = None
@@ -3626,7 +3768,7 @@ Please provide your analysis or response."""
 
     def _format_labeled_output(self, steps: list[ChainStep]) -> str:
         """Format chained output with labeled sections."""
-        parts = []
+        parts: list[str] = []
 
         for i, step in enumerate(steps):
             # Determine label based on provider or model characteristics
@@ -3708,7 +3850,7 @@ class AIOrchestrator:
     def _get_defaults_config(self) -> dict[str, Any]:
         defaults = self._user_config.get("defaults", {})
         if isinstance(defaults, dict):
-            return defaults
+            return cast(dict[str, Any], defaults)
         return {}
 
     @staticmethod
@@ -3814,7 +3956,7 @@ class AIOrchestrator:
             print(f"Warning: Config file {config_path} did not contain an object.")
             return {}
 
-        return loaded
+        return cast(dict[str, Any], loaded)
 
     def _get_provider_config(self, provider_name: str) -> dict[str, Any]:
         providers = self._user_config.get("providers", {})
@@ -3825,7 +3967,7 @@ class AIOrchestrator:
         if not isinstance(provider_config, dict):
             return {}
 
-        return provider_config
+        return cast(dict[str, Any], provider_config)
 
     async def _get_provider(self, provider_name: str) -> BaseProvider | None:
         """Get or initialize a provider"""
@@ -3928,11 +4070,20 @@ class AIOrchestrator:
         # This overrides standard selection if a valid route is defined
         task_key = self._get_config_task_key(primary_task)
         routing_config = self._user_config.get("taskRouting", {})
-        preferred_models = routing_config.get(task_key)
+        if not isinstance(routing_config, dict):
+            routing_config = {}
+        preferred_models_raw = routing_config.get(task_key)
+        preferred_models: list[str] = []
+        if isinstance(preferred_models_raw, list):
+            preferred_models = [
+                model_key
+                for model_key in preferred_models_raw
+                if isinstance(model_key, str)
+            ]
 
         candidates: list[ModelCapability] = []
 
-        if preferred_models and isinstance(preferred_models, list):
+        if preferred_models:
             # If user specified models for this task, restrict to those
             for model_key in preferred_models:
                 model = ModelRegistry.get_model(model_key)
@@ -3956,7 +4107,9 @@ class AIOrchestrator:
 
         # 2. Filter by User Config (Enabled/Disabled)
         model_config = self._user_config.get("models", {})
-        filtered_candidates = []
+        if not isinstance(model_config, dict):
+            model_config = {}
+        filtered_candidates: list[ModelCapability] = []
         for model in candidates:
             # Check if model is explicitly disabled in config
             # Try matching by specific model ID or registry key
@@ -4184,10 +4337,9 @@ class AIOrchestrator:
             try:
                 # Get Anthropic provider for routing
                 anthropic_provider = await self._get_provider("anthropic")
-                if anthropic_provider:
+                if isinstance(anthropic_provider, AnthropicProvider):
                     router = LLMRouter(anthropic_provider)
                     routing = await router.route(prompt, task_types)
-
                     if self.verbose:
                         logger.info(
                             f"LLM Router decision: models={routing.models}, "
@@ -4246,6 +4398,10 @@ class AIOrchestrator:
                     # Not chaining: use the router's selected model
                     if routing.models:
                         model_override = routing.models[0]
+                elif anthropic_provider:
+                    logger.warning(
+                        "LLM routing skipped: Anthropic provider type mismatch."
+                    )
 
             except Exception as e:
                 # Log but continue with standard model selection

@@ -148,7 +148,7 @@ python -m src.manage_models --yes
 python -m src.manage_models --yes --no-clean
 ```
 
-It includes MLX Llama 3.1 8B and MLX Qwen 3 32B (large; close other apps for best results), plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
+It includes MLX Llama 3.1 8B, MLX Qwen 2.5 Coder 14B, MLX Llama 3.2 11B Vision, MLX Ministral 14B Reasoning, plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
 
 ## Mac Applications
 

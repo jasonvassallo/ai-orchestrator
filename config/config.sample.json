@@ -26,6 +26,10 @@
       "enabled": true,
       "priority": 75
     },
+    "gpt-5.2": {
+      "enabled": true,
+      "priority": 85
+    },
     "o1": {
       "enabled": true,
       "priority": 85

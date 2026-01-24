@@ -11,6 +11,7 @@ Supports:
 
 from __future__ import annotations
 
+import logging
 import os
 import random
 from dataclasses import dataclass
@@ -39,6 +40,8 @@ except ImportError:
 
 # Music theory constants
 NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+logger = logging.getLogger(__name__)
 
 SCALES = {
     "major": [0, 2, 4, 5, 7, 9, 11],
@@ -645,13 +648,15 @@ async def generate_audio_with_musicgen(
                     "--model",
                     model_id,
                 ]
-                res = subprocess.run(cmd, capture_output=True, text=True)
+                res = subprocess.run(  # noqa: S603
+                    cmd, capture_output=True, text=True, check=False
+                )
                 if res.returncode == 0:
                     path_str = res.stdout.strip().splitlines()[-1]
                     if Path(path_str).exists():
                         return path_str
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("MusicGen script invocation failed.", exc_info=exc)
     # 1) Try Audiocraft (preferred)
     try:
         import numpy as np
@@ -686,8 +691,8 @@ async def generate_audio_with_musicgen(
         output_path = get_output_dir() / f"{filename_base}_audio.wav"
         wav.write(str(output_path), rate=sampling_rate, data=audio_int16)
         return str(output_path)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Audiocraft MusicGen generation failed.", exc_info=exc)
 
     # 2) Fallback to Transformers (when compatible)
     try:

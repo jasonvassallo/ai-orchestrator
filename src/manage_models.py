@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 # Local models that require disk space
 LOCAL_MODELS = {
     "MLX Llama 3.1 8B": "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",
-    "MLX Qwen 3 32B": "mlx-community/Qwen3-VL-32B-Instruct-4bit",
     "MLX Qwen 2.5 Coder 14B": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+    "MLX Llama 3.2 11B Vision": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
+    "MLX Ministral 14B Reasoning": "mlx-community/Ministral-3-14B-Reasoning-2512-6bit",
     "MusicGen Small": "facebook/musicgen-small",
 }
 
@@ -89,8 +90,11 @@ def enable_hf_transfer_if_available() -> None:
         return
 
     try:
-        import hf_transfer  # noqa: F401
+        import importlib.util
     except Exception:
+        return
+
+    if importlib.util.find_spec("hf_transfer") is None:
         return
 
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
@@ -174,18 +178,40 @@ def ensure_model_installed(auto_yes: bool) -> None:
 
     print("\n🔍 Checking Local Models:")
 
+    def _find_snapshot_with_weights(repo_id: str) -> Path | None:
+        weight_files = ("model.safetensors", "model.safetensors.index.json")
+        for filename in weight_files:
+            cached = try_to_load_from_cache(repo_id=repo_id, filename=filename)
+            if cached:
+                return Path(cached).parent
+
+        for cache_root in get_cache_dirs():
+            alt_folder = f"models--{repo_id.replace('/', '--')}"
+            full_path = cache_root / alt_folder
+            snapshot_dir = full_path / "snapshots"
+            if not snapshot_dir.exists():
+                continue
+            snapshots = sorted(
+                snapshot_dir.iterdir(), key=os.path.getmtime, reverse=True
+            )
+            for snap in snapshots:
+                if list(snap.glob("*.safetensors")):
+                    return snap
+                if (snap / "model.safetensors.index.json").exists():
+                    return snap
+
+        return None
+
     for name, repo_id in LOCAL_MODELS.items():
         print(f"\n--- {name} ---")
 
-        # 1. Try standard API check
-        cached = try_to_load_from_cache(repo_id=repo_id, filename="config.json")
-
-        if cached:
-            snapshot_path = Path(cached).parent
+        # 1. Check for actual weight files in cache
+        snapshot_path = _find_snapshot_with_weights(repo_id)
+        if snapshot_path:
             print(f"✅ Installed at:\n   {snapshot_path}")
             continue
 
-        # 2. Fallback: Manual folder search in all possible cache locations
+        # 2. Fallback: Manual folder search for metadata-only cache
         found_manually = False
         for cache_root in get_cache_dirs():
             alt_folder = f"models--{repo_id.replace('/', '--')}"
@@ -202,15 +228,14 @@ def ensure_model_installed(auto_yes: bool) -> None:
                     if snapshots:
                         display_path = snapshots[0]
 
-                print(f"✅ Installed at:\n   {display_path}")
+                print("⚠️  Cache metadata found but no weights.")
+                print(f"   Cache path:\n   {display_path}")
                 found_manually = True
                 break
 
-        if found_manually:
-            continue
-
-        # 3. If not found anywhere
-        print(f"⚠️  Not found in cache ({repo_id})")
+        if not found_manually:
+            # 3. If not found anywhere
+            print(f"⚠️  Not found in cache ({repo_id})")
         if auto_yes:
             choice = "y"
         else:
