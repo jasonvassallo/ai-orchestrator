@@ -6,7 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Security: Hardened](https://img.shields.io/badge/security-hardened-green.svg)](https://github.com/jasonvassallo/ai-orchestrator/security)
 
-AI Orchestrator automatically routes your queries to the best AI model based on task type. It supports **11 providers** including OpenAI, Anthropic Claude, Google (Gemini & Vertex AI), Mistral, Groq, xAI (Grok), Perplexity, DeepSeek, Moonshot (Kimi K2), Ollama, and MLX (Apple Silicon optimized) - all with secure credential management and production-ready features.
+AI Orchestrator automatically routes your queries to the best AI model based on task type. It supports **10 providers** including OpenAI, Anthropic Claude, Google (Gemini & Vertex AI), Mistral, Groq, xAI (Grok), Perplexity, DeepSeek, Moonshot (Kimi K2), and MLX (Apple Silicon optimized) - all with secure credential management and production-ready features.
 
 ## Features
 
@@ -21,7 +21,7 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 - **Vertex AI Resilience**: Structured retryable 429/resource-exhausted handling with clearer error messages
 - **Security Hardened**: Input validation, audit logging, no credential leakage
 - **VS Code Extension**: Full-featured extension with keyboard shortcuts
-- **Local Models**: Privacy-first option with Ollama or MLX
+- **Local Models**: Privacy-first option with MLX on Apple Silicon
 - **Cost Optimization**: Route to cheaper models when appropriate
 - **Web Search**: Perplexity integration for real-time information
 - **Image Generation**: DALL-E integration for creating images
@@ -44,7 +44,13 @@ pip install -e "."                      # Minimal (CLI only)
 pip install -e ".[openai,anthropic]"    # Specific providers
 pip install -e ".[gui]"                 # Native Mac app
 pip install -e ".[tui]"                 # Terminal UI
+pip install -e ".[mlx]"                 # MLX local models (Apple Silicon)
 pip install -e ".[ui]"                  # All UI options
+
+# Using uv (recommended for fast Python + venv management)
+# Uses .python-version for the interpreter
+uv venv .venv
+uv pip install -e ".[all]"
 ```
 
 ### Configure Credentials (REQUIRED)
@@ -83,7 +89,7 @@ python -m src.orchestrator "Explain quantum computing"
 # With model override
 python -m src.orchestrator "Debug this Python code" --model claude-sonnet-4.5
 
-# Prefer local models (Ollama or MLX)
+# Prefer local models (MLX)
 python -m src.orchestrator "Summarize this text" --local
 
 # Cost optimization mode
@@ -301,13 +307,10 @@ python setup_app.py py2app
 | `kimi-k2-thinking` | Complex reasoning, math | 256K | Extended thinking with visible reasoning traces |
 | `kimi-k2` | General, coding | 256K | Fast, cost-effective |
 
-### Local Models (Ollama & MLX)
+### Local Models (MLX)
 
 | Model | Provider | Best For | Strengths |
 |-------|----------|----------|-----------|
-| `llama3.2` | Ollama | Private, offline | Free, privacy-first |
-| `codellama` | Ollama | Private coding | Free, code-focused |
-| `deepseek-coder-v2` | Ollama | Complex code | Excellent coding, free |
 | `mlx-llama-vision-11b` | MLX | Apple Silicon, Vision | Vision, documents, charts, writing, 128K context |
 | `mlx-qwen3-4b` | MLX | Apple Silicon, Daily/Coding | Fast, efficient, local, private |
 | `mlx-qwen2.5-coder-14b` | MLX | Apple Silicon, Coding | Strong coding, debugging, refactoring, local |
@@ -327,6 +330,26 @@ Enable LLM-based routing for every prompt (uses your routing model subscription)
 }
 ```
 
+Routing preferences (subscription + web search):
+
+```json
+{
+  "defaults": {
+    "preferSubscriptionProviders": ["vertex-ai"],
+    "preferSubscriptionModels": ["vertex-gemini-3-pro"]
+  },
+  "models": {
+    "gemini-2.0-flash": { "enabled": false }
+  },
+  "taskRouting": {
+    "websearch": ["perplexity-sonar-pro", "perplexity-sonar-reasoning-pro"]
+  }
+}
+```
+
+- Auto mode prefers local MLX for simple prompts, Vertex Gemini 3 Flash for standard tasks, Kimi K2 Thinking for advanced math/logic/coding, and Vertex Gemini 3 Pro for advanced long-context/general reasoning.
+- Web search defaults to Perplexity Sonar Pro; when reasoning is required it uses Sonar Reasoning Pro.
+
 ## API Keys Required
 
 Based on which providers you want to use:
@@ -343,10 +366,9 @@ Based on which providers you want to use:
 | Perplexity | [perplexity.ai/settings/api](https://www.perplexity.ai/settings/api) | Optional |
 | DeepSeek | [platform.deepseek.com](https://platform.deepseek.com/) | Optional |
 | Moonshot | [platform.moonshot.ai](https://platform.moonshot.ai/) | Optional |
-| Ollama | N/A (local) | Optional |
 | MLX | N/A (local, requires `mlx-lm` or `mlx-vlm`) | Optional |
 
-**You already have:** Claude (Anthropic), OpenAI, Ollama, and Perplexity - these are ready to use!
+**You already have:** Claude (Anthropic), OpenAI, and Perplexity - these are ready to use!
 
 ## Security Features
 
@@ -372,7 +394,7 @@ The credential manager uses a priority-based fallback chain:
 
 - Maximum prompt length enforcement (500K chars)
 - Suspicious pattern detection (logged, not blocked)
-- API key redaction in logs
+- Auto-routing logs store prompt length + hash only (no prompt/response content)
 - Rate limiting to prevent abuse
 
 ### Audit Trail
@@ -383,6 +405,7 @@ All API calls are logged with:
 - Token usage
 - Latency
 - Success/failure status
+- No prompt/response content (only hashes for routing diagnostics)
 
 ## Music Generation
 
@@ -461,15 +484,22 @@ Copy `config/config.sample.json` to `~/.ai_orchestrator/config.json`:
   "defaults": {
     "preferLocal": false,
     "localProvider": "mlx",
-    "costOptimize": false,
-    "maxTokens": 4096,
-    "temperature": 0.7
+    "costOptimize": true,
+    "enableLLMRouting": true,
+    "routerAllTasks": true,
+    "routingModel": "gemini-3-flash-preview",
+    "preferSubscriptionProviders": ["vertex-ai"],
+    "preferSubscriptionModels": ["vertex-gemini-3-pro"]
+  },
+  "models": {
+    "gemini-2.0-flash": { "enabled": false }
   },
   "taskRouting": {
-    "code": ["claude-sonnet-4.5", "codestral", "deepseek-chat"],
-    "reasoning": ["o1", "claude-opus-4.5", "deepseek-reasoner"],
-    "websearch": ["perplexity-sonar-pro", "perplexity-sonar"],
-    "local": ["mlx-llama-vision-11b"]
+    "general": ["mlx-qwen3-4b", "vertex-gemini-3-flash", "vertex-gemini-3-pro"],
+    "code": ["mlx-qwen2.5-coder-14b", "kimi-k2-thinking", "vertex-gemini-3-pro"],
+    "reasoning": ["kimi-k2-thinking", "vertex-gemini-3-pro"],
+    "websearch": ["perplexity-sonar-pro", "perplexity-sonar-reasoning-pro"],
+    "long-context": ["vertex-gemini-3-pro"]
   }
 }
 ```
@@ -594,16 +624,6 @@ The orchestrator handles rate limiting automatically with exponential backoff. I
 - Spreading requests over time
 - Upgrading your API tier
 
-### "Ollama not available"
-
-```bash
-# Ensure Ollama is running
-ollama serve
-
-# Test connection
-curl http://localhost:11434/api/version
-```
-
 ## Contributing
 
 1. Fork the repository
@@ -627,5 +647,4 @@ MIT License - see [LICENSE](LICENSE) for details.
 - Perplexity for web search
 - DeepSeek for cost-effective models
 - Moonshot AI for Kimi K2 extended thinking
-- Ollama for local model support
 - Apple for MLX framework

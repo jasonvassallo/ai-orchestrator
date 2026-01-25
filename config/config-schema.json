@@ -16,14 +16,14 @@
       "properties": {
         "preferLocal": {
           "type": "boolean",
-          "description": "Prefer local models (Ollama or MLX) for privacy",
+          "description": "Prefer local models (MLX) for privacy",
           "default": false
         },
         "localProvider": {
           "type": "string",
           "description": "Preferred local inference provider when local routing is enabled",
-          "enum": ["any", "mlx", "ollama"],
-          "default": "any"
+          "enum": ["any", "mlx"],
+          "default": "mlx"
         },
         "costOptimize": {
           "type": "boolean",
@@ -44,6 +44,22 @@
           "type": "string",
           "description": "Model registry key (or raw model id) used for LLM routing",
           "default": "gemini-3-flash-preview"
+        },
+        "preferSubscriptionProviders": {
+          "type": "array",
+          "description": "Providers to prefer for advanced tasks when available",
+          "items": {
+            "type": "string"
+          },
+          "default": ["vertex-ai"]
+        },
+        "preferSubscriptionModels": {
+          "type": "array",
+          "description": "Specific model keys to prefer for advanced tasks",
+          "items": {
+            "type": "string"
+          },
+          "default": ["vertex-gemini-3-pro"]
         },
         "maxTokens": {
           "type": "integer",
@@ -101,23 +117,6 @@
       "type": "object",
       "description": "Provider-specific configuration (NOT for API keys!)",
       "properties": {
-        "ollama": {
-          "type": "object",
-          "properties": {
-            "baseUrl": {
-              "type": "string",
-              "description": "Ollama server base URL",
-              "default": "http://localhost:11434"
-            },
-            "models": {
-              "type": "array",
-              "description": "List of available Ollama models",
-              "items": {
-                "type": "string"
-              }
-            }
-          }
-        },
         "openai": {
           "type": "object",
           "properties": {

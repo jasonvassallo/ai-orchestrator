@@ -63,13 +63,19 @@ tui = [
 menubar = [
     "rumps>=0.4.0",
 ]
+# Local MLX models (Apple Silicon)
+mlx = [
+    "mlx-lm>=0.16.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "mlx-vlm>=0.1.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "huggingface-hub>=0.16.4",
+]
 # All UI options
 ui = [
     "ai-orchestrator[gui,tui,menubar]",
 ]
 # All features
 all = [
-    "ai-orchestrator[openai,anthropic,google,cohere,secure,ui]",
+    "ai-orchestrator[openai,anthropic,google,cohere,secure,ui,mlx]",
 ]
 dev = [
     "pytest>=7.0.0",

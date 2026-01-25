@@ -1,9 +1,7 @@
 {
   "$schema": "./config-schema.json",
   "version": "2.0.0",
-  
-  "_comment": "⚠️ SECURITY: NEVER store API keys in this file! Use the credential manager instead.",
-  
+  "_comment": "\u26a0\ufe0f SECURITY: NEVER store API keys in this file! Use the credential manager instead.",
   "defaults": {
     "preferLocal": false,
     "localProvider": "mlx",
@@ -11,11 +9,16 @@
     "enableLLMRouting": true,
     "routerAllTasks": true,
     "routingModel": "gemini-3-flash-preview",
+    "preferSubscriptionProviders": [
+      "vertex-ai"
+    ],
+    "preferSubscriptionModels": [
+      "vertex-gemini-3-pro"
+    ],
     "maxTokens": 4096,
     "temperature": 0.7,
     "timeout": 120
   },
-  
   "models": {
     "claude-opus-4.5": {
       "enabled": true,
@@ -46,17 +49,7 @@
       "priority": 60
     }
   },
-  
   "providers": {
-    "ollama": {
-      "baseUrl": "http://localhost:11434",
-      "models": [
-        "llama3.2",
-        "codellama",
-        "deepseek-coder-v2",
-        "mistral"
-      ]
-    },
     "openai": {
       "organization": "",
       "baseUrl": "https://api.openai.com/v1"
@@ -68,7 +61,6 @@
       "location": "global"
     }
   },
-  
   "rateLimits": {
     "openai": {
       "requestsPerMinute": 60,
@@ -81,33 +73,65 @@
     "google": {
       "requestsPerMinute": 60,
       "tokensPerMinute": 120000
-    },
-    "ollama": {
-      "requestsPerMinute": 120,
-      "tokensPerMinute": 500000
     }
   },
-  
   "logging": {
     "level": "INFO",
     "redactSensitive": true
   },
-  
   "security": {
     "maxPromptLength": 500000,
     "maxMessages": 100,
     "allowRemoteExecution": false
   },
-  
   "taskRouting": {
-    "code": ["claude-sonnet-4.5", "deepseek-coder-v2", "gpt-4o"],
-    "reasoning": ["o1", "claude-opus-4.5"],
-    "creative": ["claude-opus-4.5", "gpt-4o"],
-    "summarization": ["claude-haiku-4.5", "gpt-4o-mini"],
-    "local": ["mlx-llama-vision-11b"],
-    "long-context": ["gemini-1.5-pro", "claude-opus-4.5"]
+    "general": [
+      "mlx-qwen3-4b",
+      "vertex-gemini-3-flash",
+      "vertex-gemini-3-pro"
+    ],
+    "code": [
+      "mlx-qwen2.5-coder-14b",
+      "kimi-k2-thinking",
+      "vertex-gemini-3-pro"
+    ],
+    "reasoning": [
+      "kimi-k2-thinking",
+      "vertex-gemini-3-pro"
+    ],
+    "math": [
+      "kimi-k2-thinking",
+      "vertex-gemini-3-pro"
+    ],
+    "data-analysis": [
+      "vertex-gemini-3-pro"
+    ],
+    "multimodal": [
+      "vertex-gemini-3-pro",
+      "mlx-llama-vision-11b"
+    ],
+    "long-context": [
+      "vertex-gemini-3-pro"
+    ],
+    "websearch": [
+      "perplexity-sonar-pro",
+      "perplexity-sonar-reasoning-pro"
+    ],
+    "creative": [
+      "vertex-gemini-3-pro",
+      "claude-opus-4.5"
+    ],
+    "summarization": [
+      "claude-haiku-4.5",
+      "vertex-gemini-3-flash"
+    ],
+    "local": [
+      "mlx-qwen3-4b",
+      "mlx-qwen2.5-coder-14b",
+      "mlx-llama-vision-11b",
+      "mlx-ministral-14b-reasoning"
+    ]
   },
-
   "musicGeneration": {
     "_comment": "MusicGen AI model for audio generation (requires .music-venv)",
     "defaultModel": "musicgen-small",

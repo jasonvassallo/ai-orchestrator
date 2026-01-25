@@ -52,7 +52,11 @@ def _build_model_options() -> list[tuple[str, str]]:
         tags = []
         if model.provider in LOCAL_PROVIDERS:
             tags.append("Local")
-        tags.append(model.provider)
+        provider_tag = model.provider
+        if model.provider == "vertex-ai" and "vertex" in model.name.lower():
+            provider_tag = ""
+        if provider_tag:
+            tags.append(provider_tag)
         label = f"{model.name} ({', '.join(tags)})"
         options.append((label, key))
     return options
@@ -219,6 +223,8 @@ class ChatScreen(Screen):
     def action_new_chat(self) -> None:
         """Clear chat and start new."""
         self.messages.clear()
+        if self.orchestrator:
+            self.orchestrator.clear_history()
         container = self.query_one("#chat-container", ScrollableContainer)
         for child in list(container.children):
             if child.id != "welcome":

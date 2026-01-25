@@ -219,9 +219,9 @@ class MainWindow(QMainWindow):
             "About AI Orchestrator",
             "AI Orchestrator v2.0.0\n\n"
             "Intelligent multi-model AI assistant.\n\n"
-            "Supports 25+ models across 9 providers:\n"
+            "Supports 25+ models across providers:\n"
             "OpenAI, Anthropic, Google, Mistral,\n"
-            "Groq, xAI, Perplexity, DeepSeek, Ollama\n\n"
+            "Groq, xAI, Perplexity, DeepSeek, Moonshot, MLX\n\n"
             "github.com/jasonvassallo/ai-orchestrator",
         )
 

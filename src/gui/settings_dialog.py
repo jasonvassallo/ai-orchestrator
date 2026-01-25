@@ -95,9 +95,7 @@ class SettingsDialog(QDialog):
         self.auto_select_model.setChecked(True)
         behavior_layout.addRow(self.auto_select_model)
 
-        self.prefer_local = QCheckBox(
-            "Prefer local models (MLX or Ollama) when available"
-        )
+        self.prefer_local = QCheckBox("Prefer local models (MLX) when available")
         behavior_layout.addRow(self.prefer_local)
 
         self.cost_optimize = QCheckBox(

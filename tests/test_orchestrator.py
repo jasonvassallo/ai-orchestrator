@@ -185,7 +185,7 @@ class TestModelRegistry:
 
     def test_get_local_models(self):
         """Should filter for local models when requested"""
-        local_providers = {"ollama", "mlx"}  # Both are valid local providers
+        local_providers = {"mlx"}
         models = ModelRegistry.get_models_for_task(
             TaskType.GENERAL_NLP, require_local=True
         )
@@ -317,7 +317,7 @@ class TestAIOrchestrator:
 
     def test_model_selection_prefer_local(self):
         """Local preference should select local models (Ollama or MLX)"""
-        local_providers = {"ollama", "mlx"}  # Both are valid local providers
+        local_providers = {"mlx"}
         orchestrator = AIOrchestrator(prefer_local=True)
         tasks = [(TaskType.GENERAL_NLP, 0.5)]
         model = orchestrator.select_model(tasks)
@@ -760,19 +760,19 @@ class TestLLMRouter:
         decision = await router.route("What's the latest news?", task_types)
 
         assert isinstance(decision, RoutingDecision)
-        assert decision.models == ["perplexity-sonar-pro"]
+        assert decision.models == ["perplexity-sonar-reasoning-pro"]
         assert decision.chain is False
         assert decision.confidence == 0.85
 
     @pytest.mark.asyncio
     async def test_route_with_chaining(self, rate_limiter):
         """Should correctly parse chained model response"""
-        fake_response = '{"models": ["perplexity-sonar-pro", "kimi-k2-thinking"], "chain": true, "reasoning": "Search then analyze"}'
+        fake_response = '{"models": ["kimi-k2-thinking", "vertex-gemini-3-pro"], "chain": true, "reasoning": "Plan then refine"}'
         provider = self.FakeAnthropicProvider(rate_limiter, fake_response)
         router = LLMRouter(provider, "gemini-3-flash-preview")
 
-        task_types = [(TaskType.WEB_SEARCH, 0.9), (TaskType.EXTENDED_THINKING, 0.8)]
-        decision = await router.route("Search X and think deeply", task_types)
+        task_types = [(TaskType.CODE_GENERATION, 0.9), (TaskType.EXTENDED_THINKING, 0.8)]
+        decision = await router.route("Design and reason carefully", task_types)
 
         assert len(decision.models) == 2
         assert decision.chain is True
@@ -792,7 +792,7 @@ class TestLLMRouter:
 
     @pytest.mark.asyncio
     async def test_route_handles_markdown_wrapped_json(self, rate_limiter):
-        """Should handle JSON wrapped in markdown code blocks"""
+        """Should handle JSON wrapped in markdown code blocks (local override for simple prompts)"""
         fake_response = '```json\n{"models": ["gpt-4o"], "chain": false, "reasoning": "General query"}\n```'
         provider = self.FakeAnthropicProvider(rate_limiter, fake_response)
         router = LLMRouter(provider, "gemini-3-flash-preview")
@@ -800,7 +800,7 @@ class TestLLMRouter:
         task_types = [(TaskType.GENERAL_NLP, 0.8)]
         decision = await router.route("Hello", task_types)
 
-        assert decision.models == ["gpt-4o"]
+        assert decision.models == ["mlx-qwen3-4b"]
 
     def test_prefilter_candidates_limits_to_10(self, rate_limiter):
         """Should return at most 10 candidates"""

@@ -20,6 +20,7 @@ Security Features:
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -43,7 +44,6 @@ from .credentials import CONFIG_DIR, get_api_key
 # Configure logging with security in mind (no sensitive data in logs)
 logger = logging.getLogger(__name__)
 LOCAL_PROVIDERS = {
-    "ollama",
     "mlx",
 }
 
@@ -407,7 +407,7 @@ class OpenAIProvider(BaseProvider):
     @staticmethod
     def _uses_responses_api(model: str) -> bool:
         normalized = model.strip().lower()
-        return normalized.startswith("gpt-5")
+        return normalized.startswith(("gpt-5", "o1", "o3", "o4"))
 
     @staticmethod
     def _omit_temperature(model: str) -> bool:
@@ -423,8 +423,10 @@ class OpenAIProvider(BaseProvider):
         for msg in messages:
             if msg.get("role") == "system" and system_message is None:
                 system_message = msg.get("content", "")
-            else:
-                input_messages.append(msg)
+                continue
+            if msg.get("role") == "system":
+                continue
+            input_messages.append(msg)
         return system_message, input_messages
 
     @property
@@ -532,6 +534,77 @@ class OpenAIProvider(BaseProvider):
 class AnthropicProvider(BaseProvider):
     """Anthropic Claude API provider"""
 
+    @staticmethod
+    def _coerce_content_blocks(content: Any) -> list[dict[str, Any]]:
+        if isinstance(content, list):
+            blocks: list[dict[str, Any]] = []
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text":
+                        blocks.append({"type": "text", "text": item.get("text", "")})
+                    elif item.get("type") == "image_url":
+                        image_url = item.get("image_url", {})
+                        url_value = (
+                            image_url.get("url", "")
+                            if isinstance(image_url, dict)
+                            else image_url
+                        )
+                        if isinstance(url_value, str) and url_value:
+                            blocks.append(
+                                {
+                                    "type": "image",
+                                    "source": {"type": "url", "url": url_value},
+                                }
+                            )
+                elif isinstance(item, str):
+                    blocks.append({"type": "text", "text": item})
+            return blocks or [{"type": "text", "text": ""}]
+
+        return [{"type": "text", "text": str(content)}]
+
+    @staticmethod
+    def _extract_system_text(content: Any) -> str:
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    parts.append(str(item.get("text", "")))
+                elif isinstance(item, str):
+                    parts.append(item)
+            return " ".join(parts).strip()
+        if isinstance(content, str):
+            return content
+        return str(content)
+
+    def _normalize_messages(
+        self, messages: list[dict[str, Any]]
+    ) -> tuple[str | None, list[dict[str, Any]]]:
+        system_message: str | None = None
+        normalized: list[dict[str, Any]] = []
+
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "system":
+                if system_message is None:
+                    system_message = self._extract_system_text(content)
+                continue
+
+            normalized_role = "assistant" if role == "assistant" else "user"
+            blocks = self._coerce_content_blocks(content)
+            if normalized and normalized[-1]["role"] == normalized_role:
+                normalized[-1]["content"].extend(blocks)
+            else:
+                normalized.append({"role": normalized_role, "content": blocks})
+
+        while normalized and normalized[0]["role"] != "user":
+            normalized.pop(0)
+
+        if not normalized:
+            normalized = [{"role": "user", "content": [{"type": "text", "text": "Hello."}]}]
+
+        return system_message, normalized
+
     @property
     def provider_name(self) -> str:
         return "anthropic"
@@ -566,21 +639,17 @@ class AnthropicProvider(BaseProvider):
                 kwargs.get("max_tokens", 1000),
             )
 
-            # Extract system message if present
-            system = ""
-            chat_messages: list[dict[str, Any]] = []
-            for msg in messages:
-                if msg["role"] == "system":
-                    system = msg["content"]
-                else:
-                    chat_messages.append(msg)
+            system, chat_messages = self._normalize_messages(messages)
 
-            response = await self._client.messages.create(
-                model=model,
-                max_tokens=kwargs.get("max_tokens", 4096),
-                system=system if system else None,
-                messages=chat_messages,
-            )
+            payload = {
+                "model": model,
+                "max_tokens": kwargs.get("max_tokens", 4096),
+                "messages": chat_messages,
+            }
+            if system:
+                payload["system"] = system
+
+            response = await self._client.messages.create(**payload)
 
             latency = (time.time() - start_time) * 1000
 
@@ -1276,6 +1345,42 @@ class XAIProvider(BaseProvider):
 class PerplexityProvider(BaseProvider):
     """Perplexity AI API provider"""
 
+    @staticmethod
+    def _normalize_messages(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
+        normalized: list[dict[str, str]] = []
+        saw_non_system = False
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                parts: list[str] = []
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        parts.append(str(item.get("text", "")))
+                    elif isinstance(item, str):
+                        parts.append(item)
+                content = " ".join(parts).strip()
+            elif not isinstance(content, str):
+                content = str(content)
+
+            if role == "system":
+                if saw_non_system:
+                    continue
+                if content:
+                    normalized.append({"role": "system", "content": content})
+                continue
+
+            saw_non_system = True
+            normalized_role = "assistant" if role == "assistant" else "user"
+            if normalized:
+                last_role = normalized[-1]["role"]
+                if last_role != "system" and last_role == normalized_role:
+                    normalized[-1]["content"] = content
+                    continue
+            normalized.append({"role": normalized_role, "content": content})
+
+        return normalized
+
     @property
     def provider_name(self) -> str:
         return "perplexity"
@@ -1321,7 +1426,7 @@ class PerplexityProvider(BaseProvider):
                 "/chat/completions",
                 json={
                     "model": model,
-                    "messages": messages,
+                    "messages": self._normalize_messages(messages),
                     "max_tokens": kwargs.get("max_tokens", 4096),
                     "temperature": kwargs.get("temperature", 0.7),
                 },
@@ -1341,6 +1446,16 @@ class PerplexityProvider(BaseProvider):
                 },
                 latency_ms=latency,
                 success=True,
+            )
+        except httpx.HTTPStatusError as e:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=(time.time() - start_time) * 1000,
+                success=False,
+                error=format_http_error(e),
             )
         except Exception as e:
             return APIResponse(
@@ -1556,6 +1671,7 @@ class MLXProvider(BaseProvider):
         self._tokenizer: Any = None  # For text models
         self._processor: Any = None  # For vision models
         self._config: Any = None  # For vision models
+        self._last_error: str | None = None
 
     @property
     def provider_name(self) -> str:
@@ -1665,6 +1781,17 @@ class MLXProvider(BaseProvider):
                         )
                         os.environ["HF_HUB_OFFLINE"] = "0"
 
+            model_path_obj = Path(self.model_path)
+            if (
+                model_path_obj.exists()
+                and (model_path_obj / "processor_config.json").exists()
+                and not self._is_vision_model
+            ):
+                logger.info(
+                    "Detected vision processor artifacts; switching MLX loader to vision mode."
+                )
+                self._is_vision_model = True
+
             # Check if we have a GPU available (Metal)
             if not mx.metal.is_available():
                 logger.warning("Apple Metal (GPU) not available for MLX")
@@ -1683,7 +1810,21 @@ class MLXProvider(BaseProvider):
 
                 def _load_vision_model() -> tuple[Any, Any, Any]:
                     model, processor = vlm_load_func(self.model_path)
-                    config = load_config_func(self.model_path)
+                    config: dict[str, Any] = {}
+                    try:
+                        loaded_config = load_config_func(self.model_path)
+                        if isinstance(loaded_config, dict):
+                            config = loaded_config
+                        else:
+                            logger.warning(
+                                "Unexpected MLX vision config type (%s); using empty config.",
+                                type(loaded_config).__name__,
+                            )
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to load MLX vision config; using empty config: %s",
+                            exc,
+                        )
                     return model, processor, config
 
                 result = await asyncio.to_thread(_load_vision_model)
@@ -1706,19 +1847,22 @@ class MLXProvider(BaseProvider):
                     self._model, self._tokenizer = result
 
             self._available = True
+            self._last_error = None
             return True
 
         except ImportError as e:
             logger.warning(f"MLX dependencies not installed: {e}")
             if self._is_vision_model:
-                logger.warning("Install with: pip install mlx-vlm huggingface-hub")
+                logger.warning('Install with: pip install -e ".[mlx]" (or pip install mlx-vlm huggingface-hub)')
             else:
-                logger.warning("Install with: pip install mlx-lm huggingface-hub")
+                logger.warning('Install with: pip install -e ".[mlx]" (or pip install mlx-lm huggingface-hub)')
             self._available = False
+            self._last_error = str(e)
             return False
         except Exception as e:
             logger.error(f"Failed to load MLX model: {e}")
             self._available = False
+            self._last_error = str(e)
             return False
 
     async def complete(
@@ -1729,6 +1873,11 @@ class MLXProvider(BaseProvider):
             if not self._available or self._model is None or self._processor is None:
                 success = await self.initialize()
                 if not success or self._model is None or self._processor is None:
+                    details = (
+                        f": {self._last_error}"
+                        if self._last_error
+                        else ""
+                    )
                     return APIResponse(
                         content="",
                         model=model,
@@ -1736,12 +1885,20 @@ class MLXProvider(BaseProvider):
                         usage={},
                         latency_ms=0,
                         success=False,
-                        error="MLX vision provider not available or failed to initialize",
+                        error=(
+                            "MLX vision provider not available or failed to initialize"
+                            f"{details}"
+                        ),
                     )
         else:
             if not self._available or self._model is None or self._tokenizer is None:
                 success = await self.initialize()
                 if not success or self._model is None or self._tokenizer is None:
+                    details = (
+                        f": {self._last_error}"
+                        if self._last_error
+                        else ""
+                    )
                     return APIResponse(
                         content="",
                         model=model,
@@ -1749,7 +1906,10 @@ class MLXProvider(BaseProvider):
                         usage={},
                         latency_ms=0,
                         success=False,
-                        error="MLX provider not available or failed to initialize",
+                        error=(
+                            "MLX provider not available or failed to initialize"
+                            f"{details}"
+                        ),
                     )
 
         start_time = time.time()
@@ -1856,7 +2016,7 @@ class MLXProvider(BaseProvider):
 
             else:
                 # Text model generation using mlx_lm
-                from mlx_lm import generate
+                from mlx_lm import stream_generate
 
                 # Convert messages to prompt using tokenizer's template if available
                 if hasattr(self._tokenizer, "apply_chat_template"):
@@ -1869,17 +2029,44 @@ class MLXProvider(BaseProvider):
                 else:
                     prompt = self._format_messages(messages)
 
-                generate_func: Callable[..., str] = generate
+                stream_generate_func: Callable[..., Any] = stream_generate
 
                 # Run generation in a thread to avoid blocking the event loop
-                response_text = await asyncio.to_thread(
-                    generate_func,
-                    self._model,
-                    self._tokenizer,
-                    prompt=prompt,
-                    max_tokens=kwargs.get("max_tokens", 1024),
-                    verbose=False,
-                )
+                def _generate_text() -> tuple[str, int, int]:
+                    generated_tokens: list[int] = []
+                    text_chunks: list[str] = []
+                    prompt_tokens = 0
+                    generation_tokens = 0
+                    for response in stream_generate_func(
+                        self._model,
+                        self._tokenizer,
+                        prompt=prompt,
+                        max_tokens=kwargs.get("max_tokens", 1024),
+                    ):
+                        text_chunks.append(response.text)
+                        if response.token is not None:
+                            generated_tokens.append(response.token)
+                        prompt_tokens = response.prompt_tokens
+                        generation_tokens = response.generation_tokens
+
+                    decoded_text: str | None = None
+                    if hasattr(self._tokenizer, "decode"):
+                        try:
+                            decoded_text = self._tokenizer.decode(
+                                generated_tokens, skip_special_tokens=True
+                            )
+                        except TypeError:
+                            decoded_text = self._tokenizer.decode(generated_tokens)
+
+                    final_text = decoded_text or "".join(text_chunks)
+                    final_text = self._normalize_mlx_text(final_text)
+                    return final_text, prompt_tokens, generation_tokens
+
+                (
+                    response_text,
+                    text_prompt_tokens,
+                    text_generation_tokens,
+                ) = await asyncio.to_thread(_generate_text)
 
             latency = (time.time() - start_time) * 1000
 
@@ -1891,8 +2078,10 @@ class MLXProvider(BaseProvider):
                 }
             else:
                 usage = {
-                    "input_tokens": len(prompt.split()) if "prompt" in dir() else 0,
-                    "output_tokens": len(response_text.split()),
+                    "input_tokens": text_prompt_tokens if "text_prompt_tokens" in dir() else 0,
+                    "output_tokens": text_generation_tokens
+                    if "text_generation_tokens" in dir()
+                    else len(response_text.split()),
                 }
 
             return APIResponse(
@@ -1937,6 +2126,20 @@ class MLXProvider(BaseProvider):
             else:
                 parts.append(f"User: {content}")
         return "\n\n".join(parts)
+
+    @staticmethod
+    def _normalize_mlx_text(text: str) -> str:
+        """Normalize token artifacts occasionally emitted by MLX decoders."""
+        if not text:
+            return text
+
+        if "\u0120" in text or "\u2581" in text or "\u010a" in text:
+            text = text.replace("\u010a", "\n")
+            text = text.replace("\u0120", " ")
+            text = text.replace("\u2581", " ")
+            text = re.sub(r"[ \t]+", " ", text)
+            text = re.sub(r"\n{3,}", "\n\n", text)
+        return text
 
 
 # Provider characteristics registry for intelligent model selection
@@ -2719,37 +2922,6 @@ class ModelRegistry:
             strengths=("enterprise endpoint", "fast", "stable"),
             supports_vision=True,
         ),
-        # Local Models (Ollama)
-        "llama3.2": ModelCapability(
-            name="Llama 3.2",
-            provider="ollama",
-            model_id="llama3.2",
-            task_types=(TaskType.GENERAL_NLP, TaskType.LOCAL_MODEL),
-            context_window=128000,
-            cost_per_1k_input=0,
-            cost_per_1k_output=0,
-            strengths=("free", "private", "offline"),
-        ),
-        "codellama": ModelCapability(
-            name="Code Llama",
-            provider="ollama",
-            model_id="codellama",
-            task_types=(TaskType.CODE_GENERATION, TaskType.LOCAL_MODEL),
-            context_window=16000,
-            cost_per_1k_input=0,
-            cost_per_1k_output=0,
-            strengths=("coding", "free", "private"),
-        ),
-        "deepseek-coder-v2": ModelCapability(
-            name="DeepSeek Coder V2",
-            provider="ollama",
-            model_id="deepseek-coder-v2",
-            task_types=(TaskType.CODE_GENERATION, TaskType.LOCAL_MODEL),
-            context_window=128000,
-            cost_per_1k_input=0,
-            cost_per_1k_output=0,
-            strengths=("excellent coding", "free", "private"),
-        ),
         # Mistral Models
         "mistral-large": ModelCapability(
             name="Mistral Large",
@@ -3063,23 +3235,6 @@ class ModelRegistry:
             knowledge_cutoff="2025-10",
             best_for=("complex tasks", "professional work", "multimodal analysis"),
         ),
-        "gpt-5.2-instant": ModelCapability(
-            name="GPT-5.2 Instant",
-            provider="openai",
-            model_id="gpt-5.2-instant",
-            task_types=(
-                TaskType.GENERAL_NLP,
-                TaskType.SUMMARIZATION,
-            ),
-            context_window=128000,
-            cost_per_1k_input=0.0003,
-            cost_per_1k_output=0.0012,
-            strengths=("ultra fast", "cost-effective", "simple tasks"),
-            latency_class="instant",
-            knowledge_cutoff="2025-10",
-            best_for=("quick queries", "chat", "summarization"),
-            avoid_for=("complex reasoning", "code generation"),
-        ),
         "gpt-5.2-thinking": ModelCapability(
             name="GPT-5.2 Thinking",
             provider="openai",
@@ -3203,26 +3358,6 @@ class ModelRegistry:
             best_for=("reasoning tasks", "coding", "moderate complexity"),
         ),
         # Perplexity Sonar Reasoning Models
-        "perplexity-sonar-reasoning": ModelCapability(
-            name="Sonar Reasoning",
-            provider="perplexity",
-            model_id="sonar-reasoning",
-            task_types=(
-                TaskType.WEB_SEARCH,
-                TaskType.REASONING,
-                TaskType.EXTENDED_THINKING,
-            ),
-            context_window=128000,
-            cost_per_1k_input=0.001,
-            cost_per_1k_output=0.005,
-            strengths=("web search", "reasoning", "citations", "analysis"),
-            supports_web_search=True,
-            supports_extended_thinking=True,
-            latency_class="standard",
-            knowledge_cutoff="real-time",
-            best_for=("research with reasoning", "fact analysis", "deep search"),
-            avoid_for=("creative writing", "code generation"),
-        ),
         "perplexity-sonar-reasoning-pro": ModelCapability(
             name="Sonar Reasoning Pro",
             provider="perplexity",
@@ -3393,40 +3528,6 @@ class ModelRegistry:
             best_for=("code generation", "code review", "refactoring"),
             avoid_for=("general NLP", "creative writing"),
         ),
-        # Ollama Local Models
-        "llama4-scout": ModelCapability(
-            name="Llama 4 Scout",
-            provider="ollama",
-            model_id="llama4:scout",
-            task_types=(
-                TaskType.GENERAL_NLP,
-                TaskType.LOCAL_MODEL,
-                TaskType.CODE_GENERATION,
-            ),
-            context_window=128000,
-            cost_per_1k_input=0,
-            cost_per_1k_output=0,
-            strengths=("free", "private", "offline", "versatile"),
-            latency_class="standard",
-            best_for=("private local inference", "offline use", "general tasks"),
-        ),
-        "qwen3": ModelCapability(
-            name="Qwen 3",
-            provider="ollama",
-            model_id="qwen3",
-            task_types=(
-                TaskType.GENERAL_NLP,
-                TaskType.LOCAL_MODEL,
-                TaskType.CODE_GENERATION,
-                TaskType.REASONING,
-            ),
-            context_window=32768,
-            cost_per_1k_input=0,
-            cost_per_1k_output=0,
-            strengths=("free", "private", "coding", "reasoning", "multilingual"),
-            latency_class="standard",
-            best_for=("private local inference", "coding", "multilingual tasks"),
-        ),
     }
 
     @classmethod
@@ -3538,16 +3639,15 @@ Output JSON ONLY:
 Routing Rules:
 1. COMPLEXITY:
    - "simple": factual questions, basic definitions, simple greetings -> Use Local/Fast models.
-   - "standard": routine coding, emails, summaries -> Use Standard models (Sonnet, GPT-4o).
+   - "standard": routine coding, emails, summaries -> Prefer subscription models (Vertex Gemini 3 Flash).
    - "complex": architecture design, mathematical proofs, nuanced creative writing -> Use Reasoning/High-IQ models.
 
-2. MODEL SELECTION (coding preference):
-   - Simple/Low-Medium Code -> "mlx-qwen2.5-coder-14b" (local coding specialist)
-   - Medium Code/Bugfix -> "claude-sonnet-4.5"
-   - Most Complex Code/Architecture -> "claude-opus-4.5"
-   - Simple/Local -> "mlx-qwen3-4b", "gpt-4o-mini"
-   - Deep Reasoning/Math -> "kimi-k2-thinking", "o1"
-   - Web Search -> "perplexity-sonar-pro" or "gemini-2.0-flash"
+2. MODEL SELECTION (subscription + capability tags):
+   - Simple/Local -> "mlx-qwen3-4b" (general) or "mlx-qwen2.5-coder-14b" (code)
+   - Standard -> "vertex-gemini-3-flash" (subscription)
+   - Advanced math/logic/coding -> "kimi-k2-thinking" (fallback: "vertex-gemini-3-pro")
+   - Advanced long-context/general -> "vertex-gemini-3-pro"
+   - Web Search -> "perplexity-sonar-pro"; if reasoning needed -> "perplexity-sonar-reasoning-pro"
 
 3. CHAINING:
    - Set "chain": true ONLY if the task specifically requires gathering info (Search) then processing it (Reasoning).
@@ -3611,6 +3711,64 @@ Routing Rules:
         # Truncate prompt for router efficiency
         prompt_preview = prompt[:1000]
 
+        prompt_trimmed = prompt.strip()
+        task_set = {task for task, _ in task_types}
+        complex_tasks = {
+            TaskType.DEEP_REASONING,
+            TaskType.EXTENDED_THINKING,
+            TaskType.MATH,
+            TaskType.DATA_ANALYSIS,
+            TaskType.MULTIMODAL,
+        }
+        has_complex_task = any(task in complex_tasks for task in task_set)
+        has_search_task = TaskType.WEB_SEARCH in task_set
+        reasoning_tasks = {
+            TaskType.REASONING,
+            TaskType.DEEP_REASONING,
+            TaskType.EXTENDED_THINKING,
+            TaskType.MATH,
+            TaskType.DATA_ANALYSIS,
+            TaskType.CODE_GENERATION,
+        }
+        has_reasoning_task = any(task in reasoning_tasks for task in task_set)
+        force_local_simple = (
+            bool(prompt_trimmed)
+            and len(prompt_trimmed) <= 120
+            and not has_complex_task
+            and not has_search_task
+        )
+
+        def _infer_task_label() -> str:
+            if TaskType.CODE_GENERATION in task_set:
+                return "code"
+            if TaskType.MULTIMODAL in task_set:
+                return "multimodal"
+            return "general"
+
+        def _pick_local_simple(task_label: str) -> list[str]:
+            if (
+                TaskType.MULTIMODAL in task_set
+                and "mlx-llama-vision-11b" in ModelRegistry.MODELS
+            ):
+                return ["mlx-llama-vision-11b"]
+            if (
+                task_label == "code"
+                and "mlx-qwen2.5-coder-14b" in ModelRegistry.MODELS
+            ):
+                return ["mlx-qwen2.5-coder-14b"]
+            for key in ("mlx-qwen3-4b", "mlx-ministral-14b-reasoning"):
+                if key in ModelRegistry.MODELS:
+                    return [key]
+            return []
+
+        def _pick_web_search_model() -> list[str]:
+            if has_reasoning_task and "perplexity-sonar-reasoning-pro" in ModelRegistry.MODELS:
+                return ["perplexity-sonar-reasoning-pro"]
+            for key in ("perplexity-sonar-pro", "perplexity-sonar"):
+                if key in ModelRegistry.MODELS:
+                    return [key]
+            return []
+
         try:
             response = await self._provider.complete(
                 messages=[
@@ -3641,11 +3799,36 @@ Routing Rules:
             data = json.loads(content)
             models = data.get("models", [])
 
+            complexity = data.get("complexity")
+            task_label = data.get("task_type")
+            if has_search_task:
+                web_models = _pick_web_search_model()
+                if web_models:
+                    return RoutingDecision(
+                        models=web_models,
+                        chain=False,
+                        reasoning=f"{data.get('reasoning', 'Router-selected')} (web search override)",
+                        confidence=0.85,
+                    )
+            if not isinstance(task_label, str):
+                task_label = ""
+            if not task_label:
+                task_label = _infer_task_label()
+
+            if force_local_simple and complexity != "complex":
+                complexity = "simple"
+
+            if complexity == "simple" or force_local_simple:
+                preferred_local = _pick_local_simple(task_label)
+                if preferred_local:
+                    models = preferred_local
+
             if not models:
-                if data.get("complexity") == "complex":
+                if complexity == "complex":
                     models = ["claude-opus-4.5"]
-                elif data.get("complexity") == "simple":
-                    models = ["mlx-qwen3-4b"]
+                elif complexity == "simple":
+                    local_simple = _pick_local_simple(task_label)
+                    models = local_simple or ["claude-sonnet-4.5"]
                 else:
                     models = ["claude-sonnet-4.5"]
 
@@ -3658,8 +3841,20 @@ Routing Rules:
 
         except Exception as e:
             logger.warning(f"Smart router failed, falling back to static routing: {e}")
+            if has_search_task:
+                web_models = _pick_web_search_model()
+                if web_models:
+                    return RoutingDecision(
+                        models=web_models,
+                        chain=False,
+                        reasoning="Fallback (Web Search)",
+                        confidence=0.5,
+                    )
+            fallback_models = (
+                _pick_local_simple(_infer_task_label()) if force_local_simple else []
+            )
             return RoutingDecision(
-                models=["claude-sonnet-4.5"],
+                models=fallback_models or ["claude-sonnet-4.5"],
                 chain=False,
                 reasoning="Fallback (Router Error)",
                 confidence=0.5,
@@ -3894,6 +4089,16 @@ class AIOrchestrator:
         self.local_provider_preference = self._resolve_local_provider_preference(
             defaults
         )
+        self.prefer_subscription_providers = self._resolve_list_config(
+            defaults,
+            "preferSubscriptionProviders",
+            ["vertex-ai"],
+        )
+        self.prefer_subscription_models = self._resolve_list_config(
+            defaults,
+            "preferSubscriptionModels",
+            ["vertex-gemini-3-pro"],
+        )
         self._setup_logging()
 
     def _get_defaults_config(self) -> dict[str, Any]:
@@ -3946,6 +4151,21 @@ class AIOrchestrator:
                 return normalized
 
         return fallback
+
+    @staticmethod
+    def _resolve_list_config(
+        defaults: dict[str, Any], key: str, fallback: list[str]
+    ) -> list[str]:
+        config_value = defaults.get(key)
+        if isinstance(config_value, list):
+            cleaned = [
+                item.strip()
+                for item in config_value
+                if isinstance(item, str) and item.strip()
+            ]
+            return cleaned
+
+        return [item for item in fallback if isinstance(item, str) and item]
 
     def _apply_local_provider_preference(
         self,
@@ -4087,8 +4307,11 @@ class AIOrchestrator:
                 if await provider.initialize():
                     self.providers[provider_name] = provider
                 else:
-                    # If initialization fails, log it but don't return None from here.
-                    # The get method below will handle the case where the provider is not in the dict.
+                    # For MLX, keep the provider so we can surface detailed init errors.
+                    if provider_name == "mlx" or provider_name.startswith("mlx-"):
+                        self.providers[provider_name] = provider
+                        return provider
+                    # Otherwise, log and fall through.
                     logger.error(f"Failed to initialize provider: {provider_name}")
 
         return self.providers.get(provider_name)
@@ -4212,6 +4435,29 @@ class AIOrchestrator:
             return None
 
         candidates = self._apply_local_provider_preference(candidates)
+
+        has_priority_overrides = any(
+            isinstance(cfg, dict) and "priority" in cfg for cfg in model_config.values()
+        )
+
+        candidate_keys = {
+            key for key, model in ModelRegistry.MODELS.items() if model in candidates
+        }
+        if not has_priority_overrides:
+            preferred_key = self._pick_auto_model_override(
+                task_types,
+                prompt,
+                allowed_keys=candidate_keys,
+            )
+            if preferred_key:
+                preferred_model = ModelRegistry.MODELS.get(preferred_key)
+                if preferred_model:
+                    if self.verbose:
+                        logger.info(
+                            "Auto routing override selected %s",
+                            preferred_model.name,
+                        )
+                    return preferred_model
 
         # Score candidates using provider characteristics
         scored: list[tuple[ModelCapability, float]] = []
@@ -4370,6 +4616,240 @@ class AIOrchestrator:
 
         return weights
 
+    def _is_advanced_task(
+        self,
+        task_types: list[tuple[TaskType, float]],
+        prompt: str | None,
+    ) -> bool:
+        task_set = {task for task, _ in task_types}
+        if TaskType.LOCAL_MODEL in task_set or TaskType.WEB_SEARCH in task_set:
+            return False
+
+        advanced_tasks = {
+            TaskType.DEEP_REASONING,
+            TaskType.EXTENDED_THINKING,
+            TaskType.LONG_CONTEXT,
+            TaskType.DATA_ANALYSIS,
+            TaskType.MULTIMODAL,
+        }
+        if any(task in advanced_tasks for task in task_set):
+            return True
+
+        complexity = self._estimate_prompt_complexity(prompt) if prompt else 0.0
+        if (
+            TaskType.CODE_GENERATION in task_set
+            or TaskType.REASONING in task_set
+            or TaskType.DEEP_REASONING in task_set
+        ):
+            return complexity >= 0.45
+        return complexity >= 0.6
+
+    def _is_simple_prompt(
+        self,
+        task_types: list[tuple[TaskType, float]],
+        prompt: str | None,
+    ) -> bool:
+        if not prompt:
+            return False
+
+        prompt_trimmed = prompt.strip()
+        if not prompt_trimmed:
+            return False
+
+        task_set = {task for task, _ in task_types}
+        if TaskType.WEB_SEARCH in task_set:
+            return False
+
+        complex_tasks = {
+            TaskType.DEEP_REASONING,
+            TaskType.EXTENDED_THINKING,
+            TaskType.MATH,
+            TaskType.DATA_ANALYSIS,
+            TaskType.MULTIMODAL,
+            TaskType.LONG_CONTEXT,
+        }
+        if any(task in complex_tasks for task in task_set):
+            return False
+
+        return len(prompt_trimmed) <= 120
+
+    @staticmethod
+    def _first_available_model_key(
+        keys: tuple[str, ...],
+        allowed_keys: set[str] | None = None,
+    ) -> str | None:
+        for key in keys:
+            if key in ModelRegistry.MODELS and (
+                allowed_keys is None or key in allowed_keys
+            ):
+                return key
+        return None
+
+    def _pick_subscription_key(
+        self,
+        allowed_keys: set[str] | None = None,
+    ) -> str | None:
+        key = self._first_available_model_key(
+            tuple(self.prefer_subscription_models),
+            allowed_keys,
+        )
+        if key:
+            return key
+
+        if self.prefer_subscription_providers:
+            for reg_key, reg_model in ModelRegistry.MODELS.items():
+                if allowed_keys is not None and reg_key not in allowed_keys:
+                    continue
+                if reg_model.provider in self.prefer_subscription_providers:
+                    return reg_key
+
+        return None
+
+    def _pick_web_search_model_key(
+        self,
+        task_set: set[TaskType],
+        allowed_keys: set[str] | None = None,
+    ) -> str | None:
+        if TaskType.WEB_SEARCH not in task_set:
+            return None
+
+        reasoning_tasks = {
+            TaskType.REASONING,
+            TaskType.DEEP_REASONING,
+            TaskType.EXTENDED_THINKING,
+            TaskType.MATH,
+            TaskType.DATA_ANALYSIS,
+            TaskType.CODE_GENERATION,
+        }
+        prefers_reasoning = any(task in reasoning_tasks for task in task_set)
+
+        if prefers_reasoning:
+            key = self._first_available_model_key(
+                ("perplexity-sonar-reasoning-pro",),
+                allowed_keys,
+            )
+            if key:
+                return key
+
+        return self._first_available_model_key(
+            ("perplexity-sonar-pro", "perplexity-sonar"),
+            allowed_keys,
+        )
+
+    def _pick_advanced_reasoning_model_key(
+        self,
+        task_set: set[TaskType],
+        allowed_keys: set[str] | None = None,
+    ) -> str | None:
+        if TaskType.MULTIMODAL in task_set:
+            return self._pick_subscription_key(allowed_keys) or self._first_available_model_key(
+                ("vertex-gemini-3-pro", "gemini-3-pro"),
+                allowed_keys,
+            )
+
+        if TaskType.LONG_CONTEXT in task_set and not (
+            {TaskType.MATH, TaskType.CODE_GENERATION} & task_set
+        ):
+            return self._pick_subscription_key(allowed_keys) or self._first_available_model_key(
+                ("vertex-gemini-3-pro", "gemini-3-pro"),
+                allowed_keys,
+            )
+
+        reasoning_focus = {
+            TaskType.MATH,
+            TaskType.CODE_GENERATION,
+            TaskType.DEEP_REASONING,
+            TaskType.EXTENDED_THINKING,
+        }
+        if reasoning_focus & task_set:
+            key = self._first_available_model_key(
+                ("kimi-k2-thinking",),
+                allowed_keys,
+            )
+            if key:
+                return key
+
+        return self._pick_subscription_key(allowed_keys) or self._first_available_model_key(
+            ("vertex-gemini-3-pro", "gemini-3-pro"),
+            allowed_keys,
+        )
+
+    def _pick_standard_model_key(
+        self,
+        allowed_keys: set[str] | None = None,
+    ) -> str | None:
+        return self._first_available_model_key(
+            ("vertex-gemini-3-flash", "gemini-3-flash"),
+            allowed_keys,
+        ) or self._pick_subscription_key(allowed_keys)
+
+    def _pick_auto_model_override(
+        self,
+        task_types: list[tuple[TaskType, float]],
+        prompt: str | None,
+        current_model_key: str | None = None,
+        allowed_keys: set[str] | None = None,
+    ) -> str | None:
+        if self.prefer_local:
+            return None
+
+        task_set = {task for task, _ in task_types}
+        web_key = self._pick_web_search_model_key(task_set, allowed_keys)
+        if web_key:
+            return web_key
+
+        if self._is_simple_prompt(task_types, prompt):
+            return None
+
+        if current_model_key:
+            current_model = ModelRegistry.get_model(current_model_key)
+            if current_model and current_model.provider in LOCAL_PROVIDERS:
+                return None
+
+        if self._is_advanced_task(task_types, prompt):
+            return self._pick_advanced_reasoning_model_key(task_set, allowed_keys)
+
+        return self._pick_standard_model_key(allowed_keys)
+
+    @staticmethod
+    def _get_model_registry_key(model: ModelCapability) -> str | None:
+        for key, candidate in ModelRegistry.MODELS.items():
+            if candidate == model:
+                return key
+        return None
+
+    def _log_auto_routing_decision(
+        self,
+        prompt: str,
+        task_types: list[tuple[TaskType, float]],
+        selected_key: str,
+        routing: RoutingDecision | None,
+        override_reason: str | None = None,
+    ) -> None:
+        prompt_len = len(prompt)
+        prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:12]
+        task_summary = [
+            f"{task.name}:{confidence:.2f}" for task, confidence in task_types
+        ]
+        complexity = self._estimate_prompt_complexity(prompt)
+        router_models = routing.models if routing else []
+        router_chain = routing.chain if routing else False
+        router_reason = routing.reasoning if routing else "n/a"
+
+        logger.info(
+            "Auto routing: prompt_len=%s prompt_hash=%s tasks=%s complexity=%.2f "
+            "router_models=%s router_chain=%s router_reason=%s selected=%s override=%s",
+            prompt_len,
+            prompt_hash,
+            task_summary,
+            complexity,
+            router_models,
+            router_chain,
+            router_reason,
+            selected_key,
+            override_reason or "none",
+        )
+
     def _estimate_prompt_complexity(self, prompt: str) -> float:
         """Estimate prompt complexity (0.0 = simple, 1.0 = complex)."""
         if not prompt:
@@ -4474,6 +4954,10 @@ class AIOrchestrator:
         Returns:
             APIResponse with the result
         """
+        user_model_override = model_override
+        routing_decision: RoutingDecision | None = None
+        routing_override_reason: str | None = None
+
         # Validate input
         is_valid, error = InputValidator.validate_prompt(prompt)
         if not is_valid:
@@ -4512,6 +4996,7 @@ class AIOrchestrator:
                 if router_provider:
                     router = LLMRouter(router_provider, router_model_id)
                     routing = await router.route(prompt, task_types)
+                    routing_decision = routing
                     if self.verbose:
                         logger.info(
                             f"LLM Router decision: models={routing.models}, "
@@ -4569,6 +5054,31 @@ class AIOrchestrator:
 
                     # Not chaining: use the router's selected model
                     if routing.models:
+                        preferred_key = None
+                        task_set = {task for task, _ in task_types}
+                        if routing.chain and TaskType.WEB_SEARCH in task_set:
+                            preferred_key = self._pick_auto_model_override(
+                                task_types,
+                                prompt,
+                            )
+                            if preferred_key:
+                                routing_override_reason = "web-search"
+                        elif not routing.chain:
+                            preferred_key = self._pick_auto_model_override(
+                                task_types,
+                                prompt,
+                                current_model_key=routing.models[0],
+                            )
+                            if preferred_key and preferred_key != routing.models[0]:
+                                routing_override_reason = "auto-preference"
+                        if preferred_key:
+                            routing.models = [preferred_key]
+                            routing.chain = False
+                            if self.verbose:
+                                logger.info(
+                                    "Auto routing override -> %s",
+                                    preferred_key,
+                                )
                         model_override = routing.models[0]
                 else:
                     logger.warning("LLM routing skipped: routing provider unavailable.")
@@ -4602,6 +5112,18 @@ class AIOrchestrator:
                 latency_ms=0,
                 success=False,
                 error="Could not select a suitable model for the task.",
+            )
+
+        if user_model_override is None:
+            selected_key = model_override
+            if not selected_key:
+                selected_key = self._get_model_registry_key(model) or model.model_id
+            self._log_auto_routing_decision(
+                prompt,
+                task_types,
+                selected_key,
+                routing_decision,
+                routing_override_reason,
             )
 
         # Get provider for the selected model

@@ -83,6 +83,10 @@ Tip: set `HF_HOME="$HOME/Library/Caches/huggingface"` to keep a single consisten
 
 Scoring factors include task match, provider characteristics, avoid-for penalties, cost optimization, context window bonuses, a local model bonus when `prefer_local` is enabled, and a small bias favoring Vertex AI for Gemini 3 Preview models when available.
 
+Auto routing also supports subscription-first preferences via `defaults.preferSubscriptionProviders` and `defaults.preferSubscriptionModels`.
+Web search defaults to Perplexity Sonar (reasoning-pro when reasoning is detected), and advanced math/logic/coding prefers Kimi K2 Thinking while long-context general reasoning prefers Gemini 3 Pro.
+Auto-routing logs include prompt length + hash only (no prompt/response content).
+
 ## Async Pattern
 
 Providers use async calls with `asyncio` and `httpx`, with SDK async clients where available.
