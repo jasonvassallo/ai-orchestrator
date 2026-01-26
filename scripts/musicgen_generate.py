@@ -40,7 +40,9 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("--prompt", required=True, help="Text prompt describing the music")
-    p.add_argument("--duration", type=int, default=5, help="Duration in seconds (max 30)")
+    p.add_argument(
+        "--duration", type=int, default=5, help="Duration in seconds (max 30)"
+    )
     p.add_argument("--output", required=True, help="Output WAV file path")
     p.add_argument(
         "--model",
@@ -71,7 +73,10 @@ def main() -> int:
             print(str(out_path))
             return 0
         except Exception:
-            print(f"Failed to initialize MusicGen with model {model_id}: {pipeline_err}", file=sys.stderr)
+            print(
+                f"Failed to initialize MusicGen with model {model_id}: {pipeline_err}",
+                file=sys.stderr,
+            )
             return 2
 
     max_tokens = max(50, min(args.duration * 50, 1500))

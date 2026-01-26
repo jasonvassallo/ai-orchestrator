@@ -30,7 +30,7 @@ from .sidebar import Sidebar
 from .styles import STYLESHEET
 
 if TYPE_CHECKING:
-    from ..orchestrator import AIOrchestrator
+    from ..orchestrator import AgentStatus, AIOrchestrator
 
 
 class AsyncWorker(QObject):
@@ -358,11 +358,23 @@ class MainWindow(QMainWindow):
                 await self._generate_music_files(music_params, streaming_bubble)
                 return  # Don't query LLM for music generation
 
+            # Handle incognito mode
+            if settings.get("incognito"):
+                self._orchestrator.set_incognito(True)
+            else:
+                self._orchestrator.set_incognito(False)
+
+            # Status callback for UI updates
+            def on_status(status: AgentStatus) -> None:
+                stage_name = status.stage.name.lower()
+                self.chat_widget.update_status(stage_name, status.model)
+
             # Query the orchestrator
             response = await self._orchestrator.query(
                 message,
                 model_override=model_override,
                 system_prompt=system_prompt,
+                status_callback=on_status,
             )
 
             # Update the streaming bubble with final content

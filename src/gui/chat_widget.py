@@ -326,6 +326,86 @@ class StreamingMessageBubble(MessageBubble):
         self._render_content(layout)
 
 
+class StatusIndicator(QFrame):
+    """Animated status indicator showing processing stages."""
+
+    STATUS_MESSAGES = {
+        "validating": "Validating input...",
+        "classifying": "Classifying task...",
+        "routing": "Routing to best model...",
+        "routing_llm": "Analyzing with router...",
+        "selecting": "Selecting model...",
+        "chaining": "Executing model chain...",
+        "generating": "Generating response...",
+        "thinking": "Thinking deeply...",
+        "searching": "Searching the web...",
+    }
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._dots = 0
+        self._stage = "generating"
+        self._model: str | None = None
+        self._setup_ui()
+
+        # Animation timer
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._animate)
+        self._timer.start(400)
+
+    def _setup_ui(self) -> None:
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+
+        # Animated spinner (using unicode dot)
+        self._spinner = QLabel("●")
+        self._spinner.setStyleSheet(f"""
+            color: {COLORS["text_accent"]};
+            font-size: 14px;
+        """)
+        layout.addWidget(self._spinner)
+
+        # Status text
+        self._label = QLabel(self.STATUS_MESSAGES.get("generating", "Generating..."))
+        self._label.setStyleSheet(f"""
+            color: {COLORS["text_secondary"]};
+            font-size: 14px;
+            margin-left: 8px;
+        """)
+        layout.addWidget(self._label)
+        layout.addStretch()
+
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {COLORS["bg_secondary"]};
+                border-radius: 8px;
+                margin: 8px 0px;
+            }}
+        """)
+
+    def _animate(self) -> None:
+        """Animate the dots."""
+        self._dots = (self._dots + 1) % 4
+        base_msg = self.STATUS_MESSAGES.get(self._stage, "Processing")
+        # Remove existing dots and add new
+        base_msg = base_msg.rstrip(".")
+        msg = base_msg + "." * (self._dots + 1)
+        if self._model:
+            msg += f" ({self._model})"
+        self._label.setText(msg)
+
+    def set_status(self, stage: str, model: str | None = None) -> None:
+        """Update the displayed status."""
+        self._stage = stage
+        self._model = model
+        self._dots = 0
+        self._animate()
+
+    def stop(self) -> None:
+        """Stop the animation."""
+        self._timer.stop()
+
+
 class ChatWidget(QScrollArea):
     """Main chat display widget."""
 
@@ -335,6 +415,7 @@ class ChatWidget(QScrollArea):
         super().__init__(parent)
         self._messages: list[MessageBubble] = []
         self._streaming_bubble: StreamingMessageBubble | None = None
+        self._status_indicator: StatusIndicator | None = None
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -369,6 +450,10 @@ class ChatWidget(QScrollArea):
 
     def start_streaming(self) -> StreamingMessageBubble:
         """Start a streaming response."""
+        # Add status indicator first
+        self._status_indicator = StatusIndicator()
+        self._layout.insertWidget(self._layout.count() - 1, self._status_indicator)
+
         self._streaming_bubble = StreamingMessageBubble()
         self._streaming_bubble.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
@@ -380,8 +465,19 @@ class ChatWidget(QScrollArea):
 
         return self._streaming_bubble
 
+    def update_status(self, stage: str, model: str | None = None) -> None:
+        """Update the status indicator."""
+        if self._status_indicator:
+            self._status_indicator.set_status(stage, model)
+
     def finish_streaming(self) -> None:
         """Finalize the streaming response."""
+        # Remove status indicator
+        if self._status_indicator:
+            self._status_indicator.stop()
+            self._status_indicator.deleteLater()
+            self._status_indicator = None
+
         if self._streaming_bubble:
             self._streaming_bubble.finalize()
             self._streaming_bubble = None
@@ -432,6 +528,23 @@ class ChatWidget(QScrollArea):
 
         return "\n".join(lines)
 
+    def export_to_json(self) -> str:
+        """Export conversation as JSON string."""
+        import json
+        from datetime import datetime
+
+        if not self._messages:
+            return "{}"
+
+        data = {
+            "exported_at": datetime.now().isoformat(),
+            "messages": [
+                {"role": bubble.role, "content": bubble.content}
+                for bubble in self._messages
+            ],
+        }
+        return json.dumps(data, indent=2)
+
     def export_to_file(self, filepath: str | None = None) -> bool:
         """Export conversation to a file. Returns True on success."""
         if not self._messages:
@@ -442,19 +555,25 @@ class ChatWidget(QScrollArea):
             )
             return False
 
+        selected_filter = ""
         if filepath is None:
-            filepath, _ = QFileDialog.getSaveFileName(
+            filepath, selected_filter = QFileDialog.getSaveFileName(
                 self,
                 "Export Conversation",
                 "conversation.md",
-                "Markdown Files (*.md);;Text Files (*.txt);;All Files (*)",
+                "Markdown Files (*.md);;JSON Files (*.json);;Text Files (*.txt);;All Files (*)",
             )
 
         if not filepath:
             return False
 
         try:
-            content = self.export_to_markdown()
+            # Determine format based on extension or filter
+            if filepath.endswith(".json") or "JSON" in selected_filter:
+                content = self.export_to_json()
+            else:
+                content = self.export_to_markdown()
+
             with open(filepath, "w", encoding="utf-8") as f:
                 f.write(content)
 

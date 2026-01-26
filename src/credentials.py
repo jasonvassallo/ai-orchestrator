@@ -217,7 +217,9 @@ class EncryptedFileBackend(CredentialBackend):
             return
 
         try:
-            assert _Fernet is not None and _hashes is not None and _PBKDF2HMAC is not None
+            assert (
+                _Fernet is not None and _hashes is not None and _PBKDF2HMAC is not None
+            )
             # Derive key from machine ID
             salt = b"ai_orchestrator_v1"  # Static salt for key derivation
             kdf = _PBKDF2HMAC(
@@ -376,7 +378,9 @@ class CredentialManager:
                 "Install 'keyring' or 'cryptography' for secure storage."
             )
 
-    def get_credential(self, provider: str, silent: bool = False) -> APICredential | None:
+    def get_credential(
+        self, provider: str, silent: bool = False
+    ) -> APICredential | None:
         """
         Retrieve API credential, checking backends in priority order.
         Results are cached for performance.
@@ -534,7 +538,9 @@ def configure_credentials_interactive() -> None:
 
     print("\n" + "=" * 50)
     print("Configuration complete!")
-    print(f"Configured providers: {manager.list_configured_providers(known_providers=provider_ids)}")
+    print(
+        f"Configured providers: {manager.list_configured_providers(known_providers=provider_ids)}"
+    )
 
 
 if __name__ == "__main__":

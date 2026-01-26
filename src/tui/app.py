@@ -20,8 +20,9 @@ from typing import Any
 try:
     from textual.app import App, ComposeResult
     from textual.binding import Binding
-    from textual.containers import Horizontal, ScrollableContainer
+    from textual.containers import Container, Horizontal, ScrollableContainer
     from textual.screen import Screen
+    from textual.timer import Timer
     from textual.widgets import (
         Button,
         Footer,
@@ -39,7 +40,7 @@ except ImportError:
     sys.exit(1)
 
 
-from ..orchestrator import LOCAL_PROVIDERS, ModelRegistry
+from ..orchestrator import LOCAL_PROVIDERS, AgentStatus, ModelRegistry
 
 
 def _build_model_options() -> list[tuple[str, str]]:
@@ -69,7 +70,9 @@ MODELS = _build_model_options()
 class MessageWidget(Static):
     """A chat message widget."""
 
-    def __init__(self, role: str, content: str, model_info: str = "", **kwargs: Any) -> None:
+    def __init__(
+        self, role: str, content: str, model_info: str = "", **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self.role = role
         self.text_content = content
@@ -85,6 +88,143 @@ class MessageWidget(Static):
 
         yield Static(header_text)
         yield Markdown(self.text_content)
+
+
+class StatusWidget(Static):
+    """Animated status indicator widget with spinner."""
+
+    SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__("", **kwargs)
+        self._frame_index = 0
+        self._status_text = "Thinking..."
+        self._timer: Timer | None = None
+
+    def on_mount(self) -> None:
+        """Start animation on mount."""
+        self._timer = self.set_interval(0.1, self._animate)
+        self._update_display()
+
+    def on_unmount(self) -> None:
+        """Stop animation on unmount."""
+        if self._timer:
+            self._timer.stop()
+
+    def _animate(self) -> None:
+        """Advance animation frame."""
+        self._frame_index = (self._frame_index + 1) % len(self.SPINNER_FRAMES)
+        self._update_display()
+
+    def _update_display(self) -> None:
+        """Update the display with current frame and status."""
+        spinner = self.SPINNER_FRAMES[self._frame_index]
+        self.update(f"[cyan]{spinner}[/] [dim]{self._status_text}[/]")
+
+    def set_status(self, text: str) -> None:
+        """Update the status text."""
+        self._status_text = text
+        self._update_display()
+
+
+class ExportScreen(Screen):
+    """Screen for exporting conversation."""
+
+    CSS = """
+    ExportScreen {
+        align: center middle;
+    }
+
+    #export-dialog {
+        width: 60;
+        height: auto;
+        padding: 2;
+        background: $surface;
+        border: thick $primary;
+    }
+
+    #export-buttons {
+        margin-top: 1;
+    }
+
+    #export-buttons Button {
+        margin-right: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+    ]
+
+    def __init__(self, messages: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self.messages = messages
+
+    def compose(self) -> ComposeResult:
+        with Container(id="export-dialog"):
+            yield Static("[bold]Export Conversation[/]\n")
+            yield Label("Filename:")
+            yield Input(value="conversation.md", id="filename-input")
+            yield Static("")
+            yield Label("Format:")
+            yield Select(
+                [("Markdown (.md)", "md"), ("JSON (.json)", "json")],
+                id="format-select",
+                value="md",
+            )
+            with Horizontal(id="export-buttons"):
+                yield Button("Export", variant="primary", id="export-btn")
+                yield Button("Cancel", id="cancel-btn")
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "export-btn":
+            await self._do_export()
+        else:
+            self.app.pop_screen()
+
+    def action_cancel(self) -> None:
+        self.app.pop_screen()
+
+    async def _do_export(self) -> None:
+        import json
+        from datetime import datetime
+        from pathlib import Path
+
+        filename = self.query_one("#filename-input", Input).value
+        format_select = self.query_one("#format-select", Select)
+        export_format = format_select.value
+
+        # Generate content
+        if export_format == "json":
+            content = json.dumps(
+                {
+                    "exported_at": datetime.now().isoformat(),
+                    "messages": [
+                        {"role": role, "content": text} for role, text in self.messages
+                    ],
+                },
+                indent=2,
+            )
+            if not filename.endswith(".json"):
+                filename = filename.rsplit(".", 1)[0] + ".json"
+        else:
+            lines = ["# AI Orchestrator Conversation\n"]
+            for role, text in self.messages:
+                role_text = "**You:**" if role == "user" else "**Assistant:**"
+                lines.append(f"{role_text}\n\n{text}\n\n---\n")
+            content = "\n".join(lines)
+            if not filename.endswith(".md"):
+                filename = filename.rsplit(".", 1)[0] + ".md"
+
+        # Write file to Downloads
+        try:
+            filepath = Path.home() / "Downloads" / filename
+            filepath.write_text(content, encoding="utf-8")
+            self.app.notify(f"Exported to {filepath}", severity="information")
+        except Exception as e:
+            self.app.notify(f"Export failed: {e}", severity="error")
+
+        self.app.pop_screen()
 
 
 class ChatScreen(Screen):
@@ -159,6 +299,7 @@ class ChatScreen(Screen):
 
     BINDINGS = [
         Binding("ctrl+n", "new_chat", "New Chat"),
+        Binding("ctrl+e", "export_chat", "Export"),
         Binding("ctrl+q", "quit", "Quit"),
         Binding("escape", "focus_input", "Focus Input"),
     ]
@@ -180,6 +321,7 @@ class ChatScreen(Screen):
                 "[dim]Keyboard shortcuts:[/]\n"
                 "  • [bold]Enter[/] - Send message\n"
                 "  • [bold]Ctrl+N[/] - New chat\n"
+                "  • [bold]Ctrl+E[/] - Export conversation\n"
                 "  • [bold]Ctrl+Q[/] - Quit\n",
                 id="welcome",
             )
@@ -204,6 +346,10 @@ class ChatScreen(Screen):
             with Horizontal(classes="toggle-container"):
                 yield Label("Image", classes="toggle-label")
                 yield Switch(id="image-toggle")
+
+            with Horizontal(classes="toggle-container"):
+                yield Label("Incognito", classes="toggle-label")
+                yield Switch(id="incognito-toggle")
 
         # Input area
         with Horizontal(id="input-container"):
@@ -231,6 +377,23 @@ class ChatScreen(Screen):
                 child.remove()
         welcome = self.query_one("#welcome", Static)
         welcome.display = True
+
+    def action_export_chat(self) -> None:
+        """Export the current conversation."""
+        if not self.messages:
+            self.app.notify("No messages to export", severity="warning")
+            return
+        self.app.push_screen(ExportScreen(self.messages))
+
+    def on_switch_changed(self, event: Switch.Changed) -> None:
+        """Handle switch toggle changes."""
+        if event.switch.id == "incognito-toggle":
+            if self.orchestrator:
+                self.orchestrator.set_incognito(event.value)
+                if event.value:
+                    self.app.notify("Incognito mode enabled", severity="information")
+                else:
+                    self.app.notify("Incognito mode disabled", severity="information")
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle input submission."""
@@ -261,9 +424,7 @@ class ChatScreen(Screen):
         # Add user message
         container = self.query_one("#chat-container", ScrollableContainer)
         user_msg = MessageWidget(
-            role="user",
-            content=message,
-            classes="message user-message"
+            role="user", content=message, classes="message user-message"
         )
         await container.mount(user_msg)
         container.scroll_end()
@@ -276,10 +437,14 @@ class ChatScreen(Screen):
         web_enabled = self.query_one("#web-toggle", Switch).value
         image_enabled = self.query_one("#image-toggle", Switch).value
 
-        # Show processing indicator
-        loading = Static("[dim]Thinking...[/]", id="loading")
-        await container.mount(loading)
+        # Show animated status indicator
+        status_widget = StatusWidget(id="loading")
+        await container.mount(status_widget)
         container.scroll_end()
+
+        # Status callback for orchestrator
+        def on_status(status: AgentStatus) -> None:
+            status_widget.set_status(status.message)
 
         try:
             if self.orchestrator:
@@ -296,11 +461,12 @@ class ChatScreen(Screen):
                 if image_enabled:
                     prompt = f"[Image generation requested] {prompt}"
 
-                # Query
+                # Query with status callback
                 response = await self.orchestrator.query(
                     prompt,
                     model_override=model,
                     system_prompt=system_prompt,
+                    status_callback=on_status,
                 )
 
                 if response.success:
@@ -320,15 +486,15 @@ class ChatScreen(Screen):
                 model_used = ""
                 role_style = "message assistant-message"
 
-            # Remove loading indicator
-            loading.remove()
+            # Remove status indicator
+            status_widget.remove()
 
             # Add assistant message
             assistant_msg = MessageWidget(
                 role="assistant",
                 content=response_text,
                 model_info=model_used,
-                classes=role_style
+                classes=role_style,
             )
             await container.mount(assistant_msg)
             container.scroll_end()
@@ -337,11 +503,11 @@ class ChatScreen(Screen):
             self.messages.append(("assistant", response_text))
 
         except Exception as e:
-            loading.remove()
+            status_widget.remove()
             error_msg = MessageWidget(
                 role="assistant",
                 content=f"Error: {str(e)}",
-                classes="message assistant-message"
+                classes="message assistant-message",
             )
             await container.mount(error_msg)
             container.scroll_end()

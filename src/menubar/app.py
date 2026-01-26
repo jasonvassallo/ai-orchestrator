@@ -42,6 +42,10 @@ class AIMenuBarApp(rumps.App):
             quit_button=None,  # We'll add our own
         )
         self.orchestrator: Any = None
+        self._last_query: str | None = None
+        self._last_response: str | None = None
+        self._last_model: str | None = None
+        self._original_title = "AI"
         self._init_orchestrator()
         self._build_menu()
 
@@ -62,10 +66,17 @@ class AIMenuBarApp(rumps.App):
     def _build_menu(self) -> None:
         """Build the menu items."""
         models_menu = self._build_models_menu()
+        self._incognito_item = rumps.MenuItem(
+            "Incognito Mode", callback=self.toggle_incognito
+        )
         self.menu = [
             rumps.MenuItem("Quick Query...", callback=self.quick_query),
             None,  # Separator
             rumps.MenuItem("Models", models_menu),
+            self._incognito_item,
+            None,
+            rumps.MenuItem("Export Last Query", callback=self.export_last),
+            rumps.MenuItem("Copy Last Response", callback=self.copy_last),
             None,
             rumps.MenuItem("Open GUI App", callback=self.open_gui),
             rumps.MenuItem("Open Terminal UI", callback=self.open_tui),
@@ -76,6 +87,7 @@ class AIMenuBarApp(rumps.App):
         ]
 
         self.selected_model: str | None = None
+        self._incognito_enabled = False
 
     def _build_models_menu(self) -> list[rumps.MenuItem | None]:
         if not hasattr(self, "_model_registry"):
@@ -94,10 +106,14 @@ class AIMenuBarApp(rumps.App):
 
         for provider in sorted(models_by_provider):
             entries = []
-            for key, name in sorted(models_by_provider[provider], key=lambda item: item[1]):
+            for key, name in sorted(
+                models_by_provider[provider], key=lambda item: item[1]
+            ):
                 tag = "Local, " if provider in self._local_providers else ""
                 label = f"{name} ({tag}{provider})"
-                entries.append(rumps.MenuItem(label, callback=lambda _, m=key: self.set_model(m)))
+                entries.append(
+                    rumps.MenuItem(label, callback=lambda _, m=key: self.set_model(m))
+                )
             menu_items.append(rumps.MenuItem(provider.title(), entries))
 
         return menu_items
@@ -110,6 +126,23 @@ class AIMenuBarApp(rumps.App):
             title="AI Orchestrator",
             subtitle="Model Changed",
             message=f"Now using: {model_name}",
+        )
+
+    @rumps.clicked("Incognito Mode")
+    def toggle_incognito(self, sender: Any) -> None:
+        """Toggle incognito mode."""
+        self._incognito_enabled = not self._incognito_enabled
+        if self.orchestrator:
+            self.orchestrator.set_incognito(self._incognito_enabled)
+
+        # Update menu item with checkmark
+        sender.state = self._incognito_enabled
+
+        status = "enabled" if self._incognito_enabled else "disabled"
+        rumps.notification(
+            title="AI Orchestrator",
+            subtitle="Incognito Mode",
+            message=f"Incognito mode {status}",
         )
 
     @rumps.clicked("Quick Query...")
@@ -131,6 +164,26 @@ class AIMenuBarApp(rumps.App):
 
     def _run_query(self, query: str) -> None:
         """Run a query in a background thread."""
+        from ..orchestrator import AgentStatus
+
+        # Short status messages for menu bar
+        status_messages = {
+            "VALIDATING": "Validating...",
+            "CLASSIFYING": "Classifying...",
+            "ROUTING": "Routing...",
+            "ROUTING_LLM": "Analyzing...",
+            "SELECTING": "Selecting...",
+            "CHAINING": "Chaining...",
+            "GENERATING": "Generating...",
+            "THINKING": "Thinking...",
+            "SEARCHING": "Searching...",
+        }
+
+        def on_status(status: AgentStatus) -> None:
+            """Handle status updates."""
+            stage_name = status.stage.name
+            msg = status_messages.get(stage_name, "Processing...")
+            self.title = f"AI: {msg}"
 
         def run_async() -> None:
             loop = asyncio.new_event_loop()
@@ -139,9 +192,17 @@ class AIMenuBarApp(rumps.App):
                 if self.orchestrator:
                     result = loop.run_until_complete(
                         self.orchestrator.query(
-                            query, model_override=self.selected_model
+                            query,
+                            model_override=self.selected_model,
+                            status_callback=on_status,
                         )
                     )
+
+                    # Store last query/response
+                    self._last_query = query
+                    self._last_response = result.content
+                    self._last_model = result.model
+
                     # Show result in a dialog (truncated for notification)
                     content = result.content
                     if len(content) > 500:
@@ -159,6 +220,8 @@ class AIMenuBarApp(rumps.App):
             except Exception as e:
                 rumps.alert(title="Error", message=str(e))
             finally:
+                # Restore original title
+                self.title = self._original_title
                 loop.close()
 
         # Run in background thread
@@ -196,6 +259,80 @@ class AIMenuBarApp(rumps.App):
             subprocess.Popen(["osascript", "-e", script])  # noqa: S603
         except Exception as e:
             rumps.alert(title="Error", message=f"Could not open TUI: {e}")
+
+    @rumps.clicked("Export Last Query")
+    def export_last(self, _: Any) -> None:
+        """Export last query/response to markdown file."""
+        from datetime import datetime
+        from pathlib import Path
+
+        if not self._last_query or not self._last_response:
+            rumps.alert(
+                title="Nothing to Export",
+                message="No query has been made yet. Use 'Quick Query...' first.",
+            )
+            return
+
+        # Generate markdown content
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+        content = f"""# AI Orchestrator Query
+
+**Date:** {timestamp}
+**Model:** {self._last_model or "Unknown"}
+
+---
+
+## Prompt
+
+{self._last_query}
+
+---
+
+## Response
+
+{self._last_response}
+"""
+
+        # Save to Downloads folder
+        try:
+            filename = f"ai_query_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            filepath = Path.home() / "Downloads" / filename
+            filepath.write_text(content, encoding="utf-8")
+            rumps.notification(
+                title="AI Orchestrator",
+                subtitle="Export Complete",
+                message=f"Saved to ~/Downloads/{filename}",
+            )
+        except Exception as e:
+            rumps.alert(title="Export Error", message=f"Could not save file: {e}")
+
+    @rumps.clicked("Copy Last Response")
+    def copy_last(self, _: Any) -> None:
+        """Copy last response to clipboard."""
+        import subprocess
+
+        if not self._last_response:
+            rumps.alert(
+                title="Nothing to Copy",
+                message="No response available. Use 'Quick Query...' first.",
+            )
+            return
+
+        try:
+            # Use pbcopy on macOS
+            process = subprocess.Popen(
+                ["pbcopy"],
+                stdin=subprocess.PIPE,
+                text=True,
+            )
+            process.communicate(input=self._last_response)
+            rumps.notification(
+                title="AI Orchestrator",
+                subtitle="Copied",
+                message="Response copied to clipboard!",
+            )
+        except Exception as e:
+            rumps.alert(title="Copy Error", message=f"Could not copy to clipboard: {e}")
 
     @rumps.clicked("Configure API Keys")
     def configure_keys(self, _: Any) -> None:

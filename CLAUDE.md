@@ -161,6 +161,8 @@ Three-tier fallback chain with priority order:
 8. Model → `AIOrchestrator._get_provider()` → Provider instance (lazy init)
 9. Provider → `RetryHandler.execute_with_retry()` → `APIResponse` (or `ChainedResponse` for chains)
 
+Note: Retryable APIResponse errors and Vertex AI HTTP failures are surfaced for exponential backoff.
+
 ### UI Layer
 
 All UIs use the same `AIOrchestrator` core:
@@ -203,6 +205,15 @@ Models are scored using a multi-factor system in `select_model()`:
 
 The `_get_task_score_weights()` method maps TaskTypes to relevant characteristic weights.
 
+Additional scoring factors:
+- **Subscription preferences:** `defaults.preferSubscriptionProviders` and `defaults.preferSubscriptionModels` for subscription-first routing
+- **Vertex AI bias:** Small preference for Vertex AI when Gemini 3 Preview models are available
+- **Auto routing defaults:**
+  - Web search defaults to Perplexity Sonar (reasoning-pro when reasoning detected)
+  - Advanced math/logic/coding prefers Kimi K2 Thinking
+  - Long-context general reasoning prefers Gemini 3 Pro
+- **Logging:** Auto-routing logs include prompt length + hash only (no prompt/response content)
+
 ### Local Providers
 
 Both `ollama` and `mlx` are recognized as local providers:
@@ -236,6 +247,15 @@ To prevent unwanted 5GB+ downloads and ensure privacy, the orchestrator implemen
 - **MLX/MusicGen:** Checks the Hugging Face cache for the model ID before loading
 - **Offline Mode:** If found locally, sets `HF_HUB_OFFLINE=1` to bypass network checks and load instantly from disk
 - **On-Demand:** If the model is missing, reverts to online mode to allow download after informing the user
+
+For MLX/MusicGen, the orchestrator checks the local Hugging Face cache across multiple roots:
+- Respects `HF_HOME` (uses `HF_HOME/hub`)
+- Scans `~/Library/Caches/huggingface/hub` (macOS)
+- Scans `~/.cache/huggingface/hub` (Unix default)
+
+If a snapshot containing `*.safetensors` exists, it sets `HF_HUB_OFFLINE=1` and loads directly from disk. If only an index is present (missing shards), it enables ONLINE mode to allow fetching missing files.
+
+**Tip:** Set `HF_HOME="$HOME/Library/Caches/huggingface"` to keep a single consistent cache on macOS.
 
 ### Async Pattern
 
@@ -285,3 +305,10 @@ All provider calls are async. The orchestrator uses:
 - `AGENTS.md` - General context for AI agents (OpenAI/Generic)
 - `GEMINI.md` - Context specific to Google's Gemini
 - `CLAUDE.md` - Context specific to Anthropic's Claude (this file)
+
+## Claude Added Memories
+
+- Always keep CLAUDE.md in sync with AGENTS.md (authoritative source) and incorporate relevant updates from GEMINI.md.
+- Current date context: January 2025.
+- GPT-5.2-Codex at high reasoning was the last model to successfully process complex multi-file documentation updates.
+- TUI conversations are kept in memory only (not persisted to SQLite). To export a TUI conversation, use terminal copy/paste or redirect output. The GUI app uses `ConversationStorage` for persistent SQLite storage.

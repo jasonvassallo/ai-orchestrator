@@ -771,7 +771,10 @@ class TestLLMRouter:
         provider = self.FakeAnthropicProvider(rate_limiter, fake_response)
         router = LLMRouter(provider, "gemini-3-flash-preview")
 
-        task_types = [(TaskType.CODE_GENERATION, 0.9), (TaskType.EXTENDED_THINKING, 0.8)]
+        task_types = [
+            (TaskType.CODE_GENERATION, 0.9),
+            (TaskType.EXTENDED_THINKING, 0.8),
+        ]
         decision = await router.route("Design and reason carefully", task_types)
 
         assert len(decision.models) == 2
@@ -836,7 +839,9 @@ class TestChainedExecutor:
     class FakeProvider(BaseProvider):
         """Configurable fake provider"""
 
-        def __init__(self, rate_limiter, name: str, response: str, usage: dict | None = None):
+        def __init__(
+            self, rate_limiter, name: str, response: str, usage: dict | None = None
+        ):
             super().__init__(rate_limiter)
             self._name = name
             self._response = response

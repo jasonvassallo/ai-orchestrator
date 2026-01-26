@@ -368,12 +368,16 @@ class InputWidget(QFrame):
         self.research_toggle = ToggleButton("Research", "Enable deep research mode")
         self.image_toggle = ToggleButton("Image", "Generate images")
         self.music_toggle = ToggleButton("Music", "Generate music")
+        self.incognito_toggle = ToggleButton(
+            "Incognito", "Incognito mode: don't save or use conversation history"
+        )
 
         top_row.addWidget(self.think_toggle)
         top_row.addWidget(self.web_toggle)
         top_row.addWidget(self.research_toggle)
         top_row.addWidget(self.image_toggle)
         top_row.addWidget(self.music_toggle)
+        top_row.addWidget(self.incognito_toggle)
 
         # Music toggle opens dialog
         self.music_toggle.clicked.connect(self._on_music_toggle)
@@ -452,6 +456,7 @@ class InputWidget(QFrame):
             "music_generation": self._music_params
             if self.music_toggle.isChecked()
             else None,
+            "incognito": self.incognito_toggle.isChecked(),
         }
 
         self.text_input.clear()

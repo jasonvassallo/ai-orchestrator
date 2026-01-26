@@ -27,7 +27,7 @@ import re
 import time
 from abc import ABC, abstractmethod
 from collections import deque
-from collections.abc import Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, cast
@@ -189,6 +189,37 @@ class APIResponse:
     success: bool
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+class StatusStage(Enum):
+    """Processing stages for status updates to UIs."""
+
+    VALIDATING = auto()
+    CLASSIFYING = auto()
+    ROUTING = auto()
+    ROUTING_LLM = auto()
+    SELECTING = auto()
+    CHAINING = auto()
+    GENERATING = auto()
+    THINKING = auto()
+    SEARCHING = auto()
+
+
+@dataclass
+class AgentStatus:
+    """Status update for UI feedback during query processing."""
+
+    stage: StatusStage
+    message: str
+    progress: float | None = None
+    model: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+# Type alias for status callbacks - supports both sync and async
+StatusCallback = (
+    Callable[[AgentStatus], None] | Callable[[AgentStatus], Awaitable[None]]
+)
 
 
 class InputValidator:
@@ -601,7 +632,9 @@ class AnthropicProvider(BaseProvider):
             normalized.pop(0)
 
         if not normalized:
-            normalized = [{"role": "user", "content": [{"type": "text", "text": "Hello."}]}]
+            normalized = [
+                {"role": "user", "content": [{"type": "text", "text": "Hello."}]}
+            ]
 
         return system_message, normalized
 
@@ -1853,9 +1886,13 @@ class MLXProvider(BaseProvider):
         except ImportError as e:
             logger.warning(f"MLX dependencies not installed: {e}")
             if self._is_vision_model:
-                logger.warning('Install with: pip install -e ".[mlx]" (or pip install mlx-vlm huggingface-hub)')
+                logger.warning(
+                    'Install with: pip install -e ".[mlx]" (or pip install mlx-vlm huggingface-hub)'
+                )
             else:
-                logger.warning('Install with: pip install -e ".[mlx]" (or pip install mlx-lm huggingface-hub)')
+                logger.warning(
+                    'Install with: pip install -e ".[mlx]" (or pip install mlx-lm huggingface-hub)'
+                )
             self._available = False
             self._last_error = str(e)
             return False
@@ -1873,11 +1910,7 @@ class MLXProvider(BaseProvider):
             if not self._available or self._model is None or self._processor is None:
                 success = await self.initialize()
                 if not success or self._model is None or self._processor is None:
-                    details = (
-                        f": {self._last_error}"
-                        if self._last_error
-                        else ""
-                    )
+                    details = f": {self._last_error}" if self._last_error else ""
                     return APIResponse(
                         content="",
                         model=model,
@@ -1894,11 +1927,7 @@ class MLXProvider(BaseProvider):
             if not self._available or self._model is None or self._tokenizer is None:
                 success = await self.initialize()
                 if not success or self._model is None or self._tokenizer is None:
-                    details = (
-                        f": {self._last_error}"
-                        if self._last_error
-                        else ""
-                    )
+                    details = f": {self._last_error}" if self._last_error else ""
                     return APIResponse(
                         content="",
                         model=model,
@@ -1944,7 +1973,9 @@ class MLXProvider(BaseProvider):
                                         if isinstance(image_url, dict)
                                         else image_url
                                     )
-                                    url = url_value if isinstance(url_value, str) else ""
+                                    url = (
+                                        url_value if isinstance(url_value, str) else ""
+                                    )
                                     if url.startswith("file://"):
                                         images.append(url[7:])
                                     elif url:
@@ -1984,7 +2015,9 @@ class MLXProvider(BaseProvider):
                         vision_output_tokens,
                     ) = await asyncio.to_thread(_generate_text)
                 else:
-                    prompt = " ".join(text_parts) if text_parts else "Describe this image."
+                    prompt = (
+                        " ".join(text_parts) if text_parts else "Describe this image."
+                    )
                     formatted_prompt = apply_chat_template_func(
                         self._processor,
                         self._config,
@@ -2078,7 +2111,9 @@ class MLXProvider(BaseProvider):
                 }
             else:
                 usage = {
-                    "input_tokens": text_prompt_tokens if "text_prompt_tokens" in dir() else 0,
+                    "input_tokens": text_prompt_tokens
+                    if "text_prompt_tokens" in dir()
+                    else 0,
                     "output_tokens": text_generation_tokens
                     if "text_generation_tokens" in dir()
                     else len(response_text.split()),
@@ -3084,7 +3119,12 @@ class ModelRegistry:
             context_window=256000,
             cost_per_1k_input=0.0006,
             cost_per_1k_output=0.0025,
-            strengths=("extended thinking", "reasoning traces", "math", "complex analysis"),
+            strengths=(
+                "extended thinking",
+                "reasoning traces",
+                "math",
+                "complex analysis",
+            ),
             supports_extended_thinking=True,
             reasoning_token_limit=128000,
             latency_class="slow",
@@ -3370,12 +3410,20 @@ class ModelRegistry:
             context_window=200000,
             cost_per_1k_input=0.003,
             cost_per_1k_output=0.015,
-            strengths=("advanced web search", "deep reasoning", "comprehensive analysis"),
+            strengths=(
+                "advanced web search",
+                "deep reasoning",
+                "comprehensive analysis",
+            ),
             supports_web_search=True,
             supports_extended_thinking=True,
             latency_class="slow",
             knowledge_cutoff="real-time",
-            best_for=("complex research", "multi-source analysis", "expert-level queries"),
+            best_for=(
+                "complex research",
+                "multi-source analysis",
+                "expert-level queries",
+            ),
             avoid_for=("simple lookups", "time-sensitive tasks"),
         ),
         # =====================================================================
@@ -3516,9 +3564,7 @@ class ModelRegistry:
             name="Codestral 2",
             provider="mistral",
             model_id="codestral-2",
-            task_types=(
-                TaskType.CODE_GENERATION,
-            ),
+            task_types=(TaskType.CODE_GENERATION,),
             context_window=64000,
             cost_per_1k_input=0.0008,
             cost_per_1k_output=0.0024,
@@ -3653,7 +3699,9 @@ Routing Rules:
    - Set "chain": true ONLY if the task specifically requires gathering info (Search) then processing it (Reasoning).
 """
 
-    def __init__(self, provider: BaseProvider, model_id: str = "gemini-3-flash-preview"):
+    def __init__(
+        self, provider: BaseProvider, model_id: str = "gemini-3-flash-preview"
+    ):
         self._provider = provider
         self._model = model_id
 
@@ -3751,10 +3799,7 @@ Routing Rules:
                 and "mlx-llama-vision-11b" in ModelRegistry.MODELS
             ):
                 return ["mlx-llama-vision-11b"]
-            if (
-                task_label == "code"
-                and "mlx-qwen2.5-coder-14b" in ModelRegistry.MODELS
-            ):
+            if task_label == "code" and "mlx-qwen2.5-coder-14b" in ModelRegistry.MODELS:
                 return ["mlx-qwen2.5-coder-14b"]
             for key in ("mlx-qwen3-4b", "mlx-ministral-14b-reasoning"):
                 if key in ModelRegistry.MODELS:
@@ -3762,7 +3807,10 @@ Routing Rules:
             return []
 
         def _pick_web_search_model() -> list[str]:
-            if has_reasoning_task and "perplexity-sonar-reasoning-pro" in ModelRegistry.MODELS:
+            if (
+                has_reasoning_task
+                and "perplexity-sonar-reasoning-pro" in ModelRegistry.MODELS
+            ):
                 return ["perplexity-sonar-reasoning-pro"]
             for key in ("perplexity-sonar-pro", "perplexity-sonar"):
                 if key in ModelRegistry.MODELS:
@@ -4040,6 +4088,8 @@ Please provide your analysis or response."""
                 parts.append("")
 
         return "\n".join(parts)
+
+
 class AIOrchestrator:
     """
     Main AI Orchestrator that intelligently routes queries to the best model.
@@ -4060,8 +4110,10 @@ class AIOrchestrator:
         enable_llm_routing: bool | None = None,
         router_all_tasks: bool | None = None,
         routing_model: str | None = None,
+        incognito: bool = False,
     ) -> None:
         self.verbose = verbose
+        self.incognito = incognito
 
         self.rate_limiter = RateLimiter()
         self.providers: dict[str, BaseProvider] = {}
@@ -4742,7 +4794,9 @@ class AIOrchestrator:
         allowed_keys: set[str] | None = None,
     ) -> str | None:
         if TaskType.MULTIMODAL in task_set:
-            return self._pick_subscription_key(allowed_keys) or self._first_available_model_key(
+            return self._pick_subscription_key(
+                allowed_keys
+            ) or self._first_available_model_key(
                 ("vertex-gemini-3-pro", "gemini-3-pro"),
                 allowed_keys,
             )
@@ -4750,7 +4804,9 @@ class AIOrchestrator:
         if TaskType.LONG_CONTEXT in task_set and not (
             {TaskType.MATH, TaskType.CODE_GENERATION} & task_set
         ):
-            return self._pick_subscription_key(allowed_keys) or self._first_available_model_key(
+            return self._pick_subscription_key(
+                allowed_keys
+            ) or self._first_available_model_key(
                 ("vertex-gemini-3-pro", "gemini-3-pro"),
                 allowed_keys,
             )
@@ -4769,7 +4825,9 @@ class AIOrchestrator:
             if key:
                 return key
 
-        return self._pick_subscription_key(allowed_keys) or self._first_available_model_key(
+        return self._pick_subscription_key(
+            allowed_keys
+        ) or self._first_available_model_key(
             ("vertex-gemini-3-pro", "gemini-3-pro"),
             allowed_keys,
         )
@@ -4902,7 +4960,9 @@ class AIOrchestrator:
 
         return min(score, 1.0)
 
-    def _code_complexity_bonus(self, model: ModelCapability, complexity: float) -> float:
+    def _code_complexity_bonus(
+        self, model: ModelCapability, complexity: float
+    ) -> float:
         """Bias toward fast or strong coding models based on complexity."""
         name_lower = model.name.lower()
         strengths_lower = " ".join(model.strengths).lower()
@@ -4933,6 +4993,21 @@ class AIOrchestrator:
 
         return bonus
 
+    async def _emit_status(
+        self,
+        callback: StatusCallback | None,
+        stage: StatusStage,
+        message: str,
+        **kwargs: Any,
+    ) -> None:
+        """Emit status update to callback if provided."""
+        if callback is None:
+            return
+        status = AgentStatus(stage=stage, message=message, **kwargs)
+        result = callback(status)
+        if asyncio.iscoroutine(result):
+            await result
+
     async def query(
         self,
         prompt: str,
@@ -4940,6 +5015,7 @@ class AIOrchestrator:
         model_override: str | None = None,
         max_tokens: int = 4096,
         temperature: float = 0.7,
+        status_callback: StatusCallback | None = None,
     ) -> APIResponse:
         """
         Send a query to the AI orchestrator.
@@ -4959,6 +5035,9 @@ class AIOrchestrator:
         routing_override_reason: str | None = None
 
         # Validate input
+        await self._emit_status(
+            status_callback, StatusStage.VALIDATING, "Validating input..."
+        )
         is_valid, error = InputValidator.validate_prompt(prompt)
         if not is_valid:
             return APIResponse(
@@ -4972,12 +5051,18 @@ class AIOrchestrator:
             )
 
         # Classify task
+        await self._emit_status(
+            status_callback, StatusStage.CLASSIFYING, "Classifying task..."
+        )
         task_types = TaskClassifier.classify(prompt)
 
         if self.verbose:
             logger.info(f"Classified task types: {task_types}")
 
         # Check for multi-model routing (only when no model override)
+        await self._emit_status(
+            status_callback, StatusStage.ROUTING, "Routing to best model..."
+        )
         should_route = (
             not model_override
             and self.enable_llm_routing
@@ -4994,6 +5079,11 @@ class AIOrchestrator:
                     router_model_id = self.routing_model
 
                 if router_provider:
+                    await self._emit_status(
+                        status_callback,
+                        StatusStage.ROUTING_LLM,
+                        "Analyzing with router model...",
+                    )
                     router = LLMRouter(router_provider, router_model_id)
                     routing = await router.route(prompt, task_types)
                     routing_decision = routing
@@ -5005,6 +5095,11 @@ class AIOrchestrator:
 
                     if routing.chain and len(routing.models) > 1:
                         # Execute chained response
+                        await self._emit_status(
+                            status_callback,
+                            StatusStage.CHAINING,
+                            "Executing model chain...",
+                        )
                         executor = ChainedExecutor(self._get_provider)
                         chained_response = await executor.execute_chain(
                             prompt=prompt,
@@ -5014,18 +5109,24 @@ class AIOrchestrator:
                             temperature=temperature,
                         )
 
-                        # Update conversation history with final response
-                        if chained_response.final_content:
+                        # Update conversation history with final response (unless incognito)
+                        if chained_response.final_content and not self.incognito:
                             self.conversation_history.append(
                                 {"role": "user", "content": prompt}
                             )
                             self.conversation_history.append(
-                                {"role": "assistant", "content": chained_response.final_content}
+                                {
+                                    "role": "assistant",
+                                    "content": chained_response.final_content,
+                                }
                             )
                             # Prevent unbounded history growth
-                            if len(self.conversation_history) > self._max_history_messages:
+                            if (
+                                len(self.conversation_history)
+                                > self._max_history_messages
+                            ):
                                 self.conversation_history = self.conversation_history[
-                                    -self._max_history_messages:
+                                    -self._max_history_messages :
                                 ]
 
                         # Wrap ChainedResponse in APIResponse for backward compatibility
@@ -5035,10 +5136,12 @@ class AIOrchestrator:
                             provider="chained",
                             usage={
                                 "input_tokens": sum(
-                                    s.usage.get("input_tokens", 0) for s in chained_response.steps
+                                    s.usage.get("input_tokens", 0)
+                                    for s in chained_response.steps
                                 ),
                                 "output_tokens": sum(
-                                    s.usage.get("output_tokens", 0) for s in chained_response.steps
+                                    s.usage.get("output_tokens", 0)
+                                    for s in chained_response.steps
                                 ),
                             },
                             latency_ms=chained_response.total_latency_ms,
@@ -5046,7 +5149,9 @@ class AIOrchestrator:
                             metadata={
                                 "chained": True,
                                 "steps": len(chained_response.steps),
-                                "step_models": [s.model_key for s in chained_response.steps],
+                                "step_models": [
+                                    s.model_key for s in chained_response.steps
+                                ],
                                 "total_cost": chained_response.total_cost,
                                 "routing_reasoning": chained_response.routing_reasoning,
                             },
@@ -5085,9 +5190,14 @@ class AIOrchestrator:
 
             except Exception as e:
                 # Log but continue with standard model selection
-                logger.warning(f"LLM routing failed, falling back to standard selection: {e}")
+                logger.warning(
+                    f"LLM routing failed, falling back to standard selection: {e}"
+                )
 
         # Select model
+        await self._emit_status(
+            status_callback, StatusStage.SELECTING, "Selecting model..."
+        )
         if model_override:
             model = ModelRegistry.get_model(model_override)
             if not model:
@@ -5151,22 +5261,48 @@ class AIOrchestrator:
                 error=f"Provider '{model.provider}' is not available or failed to initialize.",
             )
 
-        # Build messages
+        # Build messages for current turn
         messages: list[dict[str, Any]] = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
-        # Add conversation history
-        self.conversation_history.extend(messages)
+        # Add to conversation history (unless incognito mode)
+        if not self.incognito:
+            self.conversation_history.extend(messages)
+
+        # Emit status based on provider type
+        if model.provider == "perplexity":
+            await self._emit_status(
+                status_callback,
+                StatusStage.SEARCHING,
+                "Searching the web...",
+                model=model.name,
+            )
+        elif model.provider == "moonshot" or model.supports_extended_thinking:
+            await self._emit_status(
+                status_callback,
+                StatusStage.THINKING,
+                "Thinking deeply...",
+                model=model.name,
+            )
+        else:
+            await self._emit_status(
+                status_callback,
+                StatusStage.GENERATING,
+                "Generating response...",
+                model=model.name,
+            )
 
         # Query the provider with retry logic
         last_response: APIResponse | None = None
+        # Use current messages only in incognito mode, otherwise full history
+        messages_to_send = messages if self.incognito else self.conversation_history
 
         async def _attempt() -> APIResponse:
             nonlocal last_response
             response = await provider.complete(
-                self.conversation_history,
+                messages_to_send,
                 model=model.model_id,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -5182,8 +5318,8 @@ class AIOrchestrator:
 
         try:
             response = await RetryHandler.execute_with_retry(_attempt)
-            # Add successful response to history
-            if response.success and response.content:
+            # Add successful response to history (unless incognito mode)
+            if response.success and response.content and not self.incognito:
                 self.conversation_history.append(
                     {"role": "assistant", "content": response.content}
                 )
@@ -5210,6 +5346,18 @@ class AIOrchestrator:
     def clear_history(self) -> None:
         """Clear conversation history"""
         self.conversation_history.clear()
+
+    def set_incognito(self, enabled: bool) -> None:
+        """Enable or disable incognito mode.
+
+        When incognito is enabled:
+        - Conversation history is not saved
+        - Each query is independent (no context from previous messages)
+        - Existing history is cleared when entering incognito mode
+        """
+        self.incognito = enabled
+        if enabled:
+            self.conversation_history.clear()
 
     async def multi_model_query(
         self,
@@ -5254,6 +5402,11 @@ class AIOrchestrator:
 async def main() -> None:
     """CLI interface for the orchestrator"""
     import argparse
+    from datetime import datetime
+
+    from rich.console import Console
+
+    console = Console()
 
     parser = argparse.ArgumentParser(description="AI Orchestrator CLI")
     parser.add_argument("prompt", nargs="?", help="The prompt to send")
@@ -5276,6 +5429,17 @@ async def main() -> None:
     parser.add_argument("--configure", action="store_true", help="Configure API keys")
     parser.add_argument(
         "--list-models", action="store_true", help="List available models"
+    )
+    parser.add_argument(
+        "--output",
+        "-o",
+        help="Export response to file (markdown or json based on extension)",
+    )
+    parser.add_argument(
+        "--incognito",
+        "-i",
+        action="store_true",
+        help="Incognito mode: don't save or use conversation history",
     )
 
     args = parser.parse_args()
@@ -5308,23 +5472,79 @@ async def main() -> None:
         prefer_local=args.local,
         cost_optimize=args.cheap,
         verbose=args.verbose,
+        incognito=args.incognito,
     )
 
-    response = await orchestrator.query(
-        prompt=args.prompt,
-        model_override=args.model,
-    )
+    # Status callback for CLI spinner
+    status_handle: Any = None
+
+    def on_status(status: AgentStatus) -> None:
+        nonlocal status_handle
+        if status_handle is not None:
+            status_handle.update(f"[cyan]{status.message}")
+
+    # Execute query with animated status
+    with console.status("[cyan]Initializing...", spinner="dots") as status:
+        status_handle = status
+        response = await orchestrator.query(
+            prompt=args.prompt,
+            model_override=args.model,
+            status_callback=on_status,
+        )
 
     if response.success:
-        print(f"\n[{response.model}] ({response.latency_ms:.0f}ms)")
-        print("-" * 60)
-        print(response.content)
-        print("-" * 60)
-        print(
-            f"Tokens: {response.usage.get('input_tokens', 0)} in / {response.usage.get('output_tokens', 0)} out"
+        console.print(
+            f"\n[bold cyan][{response.model}][/] [dim]({response.latency_ms:.0f}ms)[/]"
         )
+        console.print("-" * 60)
+        console.print(response.content)
+        console.print("-" * 60)
+        console.print(
+            f"[dim]Tokens: {response.usage.get('input_tokens', 0)} in / {response.usage.get('output_tokens', 0)} out[/]"
+        )
+
+        # Export if requested
+        if args.output:
+            if args.output.endswith(".json"):
+                export_content = json.dumps(
+                    {
+                        "date": datetime.now().isoformat(),
+                        "model": response.model,
+                        "latency_ms": response.latency_ms,
+                        "prompt": args.prompt,
+                        "response": response.content,
+                        "usage": response.usage,
+                    },
+                    indent=2,
+                )
+            else:
+                export_content = f"""# AI Orchestrator Response
+
+**Date:** {datetime.now().strftime("%Y-%m-%d %H:%M")}
+**Model:** {response.model}
+**Latency:** {response.latency_ms:.0f}ms
+
+---
+
+## Prompt
+
+{args.prompt}
+
+---
+
+## Response
+
+{response.content}
+
+---
+
+Tokens: {response.usage.get("input_tokens", 0)} in / {response.usage.get("output_tokens", 0)} out
+"""
+            with open(args.output, "w", encoding="utf-8") as f:
+                f.write(export_content)
+            console.print(f"\n[green]✓ Exported to {args.output}[/]")
     else:
-        print(f"\nError: {response.error}")
+        console.print(f"\n[red]Error: {response.error}[/]")
 
 
 if __name__ == "__main__":
