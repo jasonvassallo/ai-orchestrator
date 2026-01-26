@@ -26,6 +26,10 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 - **Web Search**: Perplexity integration for real-time information
 - **Image Generation**: DALL-E integration for creating images
 - **Music Generation**: Create MIDI and audio files with AI (separate drums/bass/chords tracks, 90s tech-house patterns)
+- **Animated Status**: Real-time processing indicators across all UIs (validating, routing, generating, etc.)
+- **Conversation Export**: Export to markdown or JSON from all interfaces (CLI: `-o`, TUI: Ctrl+E, GUI: Ctrl/Cmd+E)
+- **Model Attribution**: Every response includes which model generated it for transparency
+- **Incognito Mode**: Disable history saving while preserving existing context
 
 ## Quick Start
 
@@ -94,6 +98,10 @@ python -m src.orchestrator "Summarize this text" --local
 
 # Cost optimization mode
 python -m src.orchestrator "Write a haiku" --cheap
+
+# Export response to file (markdown or JSON)
+python -m src.orchestrator "Summarize AI news" -o response.md
+python -m src.orchestrator "Explain quantum computing" -o response.json
 
 # Verbose mode for debugging
 python -m src.orchestrator "Complex analysis task" --verbose
