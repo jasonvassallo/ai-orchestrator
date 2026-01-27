@@ -152,6 +152,11 @@ class MainWindow(QMainWindow):
         export_action.triggered.connect(self._export_conversation)
         file_menu.addAction(export_action)
 
+        compact_action = QAction("Compact History...", self)
+        compact_action.setShortcut(QKeySequence("Ctrl+K"))
+        compact_action.triggered.connect(self._compact_conversation)
+        file_menu.addAction(compact_action)
+
         # Edit menu
         edit_menu = menubar.addMenu("Edit")
 
@@ -175,6 +180,53 @@ class MainWindow(QMainWindow):
     def _export_conversation(self) -> None:
         """Export the current conversation to a file."""
         self.chat_widget.export_to_file()
+
+    def _compact_conversation(self) -> None:
+        """Compact conversation history into a summary."""
+        import asyncio
+
+        if not self._orchestrator:
+            QMessageBox.warning(
+                self,
+                "Not Available",
+                "Orchestrator not initialized.",
+            )
+            return
+
+        if len(self.chat_widget._messages) < 2:
+            QMessageBox.information(
+                self,
+                "Nothing to Compact",
+                "Not enough messages to compact. Continue the conversation first.",
+            )
+            return
+
+        # Run compaction asynchronously
+        async def do_compact() -> None:
+            result = await self._orchestrator.compact_conversation()
+            if result:
+                # Add a visual separator showing the compaction
+                self.chat_widget.add_message(
+                    "system",
+                    f"**Conversation Compacted**\n\n"
+                    f"*{result.original_message_count} messages summarized "
+                    f"(~{result.tokens_saved_estimate} tokens saved)*\n\n"
+                    f"**Summary:**\n{result.summary}",
+                )
+                QMessageBox.information(
+                    self,
+                    "Compacted",
+                    f"Compacted {result.original_message_count} messages.\n"
+                    f"Estimated tokens saved: ~{result.tokens_saved_estimate}",
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Failed",
+                    "Failed to compact conversation. Please try again.",
+                )
+
+        asyncio.ensure_future(do_compact())
 
     def _copy_conversation(self) -> None:
         """Copy the entire conversation to clipboard."""

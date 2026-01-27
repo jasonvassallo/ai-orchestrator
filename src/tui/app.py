@@ -300,6 +300,7 @@ class ChatScreen(Screen):
     BINDINGS = [
         Binding("ctrl+n", "new_chat", "New Chat"),
         Binding("ctrl+e", "export_chat", "Export"),
+        Binding("ctrl+k", "compact_chat", "Compact"),
         Binding("ctrl+q", "quit", "Quit"),
         Binding("escape", "focus_input", "Focus Input"),
     ]
@@ -322,6 +323,7 @@ class ChatScreen(Screen):
                 "  • [bold]Enter[/] - Send message\n"
                 "  • [bold]Ctrl+N[/] - New chat\n"
                 "  • [bold]Ctrl+E[/] - Export conversation\n"
+                "  • [bold]Ctrl+K[/] - Compact history (summarize)\n"
                 "  • [bold]Ctrl+Q[/] - Quit\n",
                 id="welcome",
             )
@@ -384,6 +386,61 @@ class ChatScreen(Screen):
             self.app.notify("No messages to export", severity="warning")
             return
         self.app.push_screen(ExportScreen(self.messages))
+
+    async def action_compact_chat(self) -> None:
+        """Compact conversation history into a summary."""
+        if not self.orchestrator:
+            self.app.notify("Orchestrator not available", severity="error")
+            return
+
+        if len(self.messages) < 2:
+            self.app.notify("Not enough messages to compact", severity="warning")
+            return
+
+        if self.is_processing:
+            self.app.notify("Please wait for current operation", severity="warning")
+            return
+
+        self.is_processing = True
+        container = self.query_one("#chat-container", ScrollableContainer)
+
+        # Show status while compacting
+        status_widget = StatusWidget(id="compact-status")
+        await container.mount(status_widget)
+        status_widget.set_status("Compacting conversation...")
+        container.scroll_end()
+
+        try:
+            result = await self.orchestrator.compact_conversation()
+
+            # Remove status widget
+            status_widget.remove()
+
+            if result:
+                # Add a visual separator showing the compaction
+                summary_msg = MessageWidget(
+                    role="system",
+                    content=f"**Conversation Compacted**\n\n"
+                    f"*{result.original_message_count} messages summarized "
+                    f"(~{result.tokens_saved_estimate} tokens saved)*\n\n"
+                    f"**Summary:**\n{result.summary}",
+                    model_info=f"[dim]by {result.model_used}[/]",
+                    classes="message system-message",
+                )
+                await container.mount(summary_msg)
+                container.scroll_end()
+                self.app.notify(
+                    f"Compacted {result.original_message_count} messages",
+                    severity="information",
+                )
+            else:
+                self.app.notify("Failed to compact conversation", severity="error")
+
+        except Exception as e:
+            status_widget.remove()
+            self.app.notify(f"Error: {e}", severity="error")
+        finally:
+            self.is_processing = False
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         """Handle switch toggle changes."""

@@ -76,6 +76,7 @@ class AIMenuBarApp(rumps.App):
             self._incognito_item,
             None,
             rumps.MenuItem("Export Last Query", callback=self.export_last),
+            rumps.MenuItem("Compact History", callback=self.compact_history),
             rumps.MenuItem("Copy Last Response", callback=self.copy_last),
             None,
             rumps.MenuItem("Open GUI App", callback=self.open_gui),
@@ -305,6 +306,50 @@ class AIMenuBarApp(rumps.App):
             )
         except Exception as e:
             rumps.alert(title="Export Error", message=f"Could not save file: {e}")
+
+    @rumps.clicked("Compact History")
+    def compact_history(self, _: Any) -> None:
+        """Compact conversation history into a summary."""
+        import asyncio
+
+        if not self.orchestrator:
+            rumps.alert(
+                title="Not Available",
+                message="Orchestrator not initialized.",
+            )
+            return
+
+        # Check if there's enough history
+        if len(self.orchestrator.conversation_history) < 2:
+            rumps.alert(
+                title="Nothing to Compact",
+                message="Not enough conversation history to compact.",
+            )
+            return
+
+        async def do_compact() -> None:
+            result = await self.orchestrator.compact_conversation()
+            if result:
+                rumps.notification(
+                    title="AI Orchestrator",
+                    subtitle="History Compacted",
+                    message=f"Compacted {result.original_message_count} messages "
+                    f"(~{result.tokens_saved_estimate} tokens saved)",
+                )
+            else:
+                rumps.alert(
+                    title="Compaction Failed",
+                    message="Failed to compact conversation history.",
+                )
+
+        # Run asynchronously
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        loop.run_until_complete(do_compact())
 
     @rumps.clicked("Copy Last Response")
     def copy_last(self, _: Any) -> None:

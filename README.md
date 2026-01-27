@@ -30,6 +30,8 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 - **Conversation Export**: Export to markdown or JSON from all interfaces (CLI: `-o`, TUI: Ctrl+E, GUI: Ctrl/Cmd+E)
 - **Model Attribution**: Every response includes which model generated it for transparency
 - **Incognito Mode**: Disable history saving while preserving existing context
+- **Conversation Compaction**: Summarize long conversations to save context tokens (TUI: Ctrl+K, GUI: Ctrl+K, Menu Bar: Compact History)
+- **Audit Timestamps**: All messages and responses include ISO timestamps for security analysis
 
 ## Quick Start
 
