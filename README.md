@@ -32,6 +32,7 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 - **Incognito Mode**: Disable history saving while preserving existing context
 - **Conversation Compaction**: Summarize long conversations to save context tokens (TUI: Ctrl+K, GUI: Ctrl+K, Menu Bar: Compact History)
 - **Audit Timestamps**: All messages and responses include ISO timestamps for security analysis
+- **Security Analyzer**: Post-incident detection of prompt injection, jailbreaks, and response leakage with severity-based logging
 
 ## Quick Start
 

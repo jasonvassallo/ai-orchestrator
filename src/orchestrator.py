@@ -292,6 +292,285 @@ class InputValidator:
         return sanitized + ("..." if len(text) > max_len else "")
 
 
+class SecuritySeverity(Enum):
+    """Severity levels for security alerts."""
+
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+@dataclass
+class SecurityAlert:
+    """A security alert from post-incident analysis."""
+
+    severity: SecuritySeverity
+    alert_type: str
+    description: str
+    detected_pattern: str | None = None
+    timestamp: str | None = None
+    recommendation: str | None = None
+
+
+class SecurityAnalyzer:
+    """Post-incident security analyzer for detecting attack patterns.
+
+    Analyzes prompts and responses after each query to detect:
+    - Prompt injection attempts
+    - System prompt leakage
+    - Jailbreak patterns
+    - Behavioral anomalies
+    """
+
+    # Prompt injection patterns (check in prompts)
+    INJECTION_PATTERNS = [
+        (r"ignore\s+(all\s+)?previous\s+instructions?", "Instruction override attempt"),
+        (r"forget\s+(all\s+)?previous\s+instructions?", "Instruction forget attempt"),
+        (r"disregard\s+(all\s+)?previous", "Instruction disregard attempt"),
+        (r"you\s+are\s+now\s+(?:a|in)\s+(?:new|different)", "Role hijacking attempt"),
+        (r"pretend\s+(?:you\s+are|to\s+be)\s+(?!helping)", "Identity manipulation"),
+        (r"act\s+as\s+if\s+you\s+(?:have\s+no|don.t\s+have)", "Capability override"),
+        (r"new\s+(?:system\s+)?prompt[:\s]", "System prompt injection"),
+        (r"<\s*system\s*>", "XML system tag injection"),
+        (r"\[INST\]|\[/INST\]", "Instruction tag injection"),
+        (r"```system", "Code block system injection"),
+        (r"reveal\s+(?:your\s+)?(?:system\s+)?prompt", "Prompt extraction attempt"),
+        (
+            r"show\s+(?:me\s+)?(?:your\s+)?(?:system\s+)?instructions?",
+            "Instruction extraction",
+        ),
+        (
+            r"what\s+(?:are|is)\s+your\s+(?:system\s+)?(?:prompt|instructions?)",
+            "Prompt query",
+        ),
+        (r"bypass\s+(?:your\s+)?(?:safety|security|filter)", "Safety bypass attempt"),
+        (r"jailbreak", "Explicit jailbreak mention"),
+        (r"DAN\s+mode|do\s+anything\s+now", "DAN jailbreak pattern"),
+    ]
+
+    # Response leakage patterns (check in responses)
+    LEAKAGE_PATTERNS = [
+        (
+            r"my\s+(?:system\s+)?(?:prompt|instructions?)\s+(?:is|are|says?)",
+            "Possible prompt leak",
+        ),
+        (
+            r"i\s+(?:was|am)\s+(?:instructed|told|programmed)\s+to",
+            "Instruction disclosure",
+        ),
+        (
+            r"my\s+(?:original|initial)\s+(?:prompt|instructions?)",
+            "Original prompt reference",
+        ),
+        (
+            r"the\s+system\s+(?:prompt|message)\s+(?:says?|tells?|instructs?)",
+            "System prompt disclosure",
+        ),
+    ]
+
+    # Behavioral patterns (check in responses - might indicate successful attack)
+    BEHAVIORAL_PATTERNS = [
+        (r"(?:sudo|rm\s+-rf|chmod\s+777|/etc/passwd)", "Dangerous command in response"),
+        (r"(?:exec|eval|system)\s*\([^)]+\)", "Code execution in response"),
+        (r"(?:import\s+os|subprocess|__import__)", "Dangerous import in response"),
+        (
+            r"(?:api[_-]?key|secret|password)\s*[=:]\s*['\"][^'\"]+['\"]",
+            "Credential in response",
+        ),
+    ]
+
+    # Temporal thresholds
+    MIN_REQUEST_INTERVAL_MS = 100  # Requests faster than this are suspicious
+    MAX_REQUESTS_PER_MINUTE = 60  # More than this is suspicious
+
+    def __init__(self) -> None:
+        self._request_timestamps: list[str] = []
+        self._alert_history: list[SecurityAlert] = []
+        self._compiled_injection = [
+            (re.compile(p, re.IGNORECASE), d) for p, d in self.INJECTION_PATTERNS
+        ]
+        self._compiled_leakage = [
+            (re.compile(p, re.IGNORECASE), d) for p, d in self.LEAKAGE_PATTERNS
+        ]
+        self._compiled_behavioral = [
+            (re.compile(p, re.IGNORECASE), d) for p, d in self.BEHAVIORAL_PATTERNS
+        ]
+
+    def analyze_prompt(self, prompt: str) -> list[SecurityAlert]:
+        """Analyze a prompt for injection attempts."""
+        alerts: list[SecurityAlert] = []
+        from datetime import datetime, timezone
+
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        for pattern, description in self._compiled_injection:
+            match = pattern.search(prompt)
+            if match:
+                severity = SecuritySeverity.HIGH
+                if "jailbreak" in description.lower() or "DAN" in match.group():
+                    severity = SecuritySeverity.CRITICAL
+
+                alerts.append(
+                    SecurityAlert(
+                        severity=severity,
+                        alert_type="PROMPT_INJECTION",
+                        description=description,
+                        detected_pattern=match.group()[:100],
+                        timestamp=timestamp,
+                        recommendation="Review prompt source. Consider blocking this request.",
+                    )
+                )
+
+        return alerts
+
+    def analyze_response(
+        self, response: str, original_prompt: str
+    ) -> list[SecurityAlert]:
+        """Analyze a response for leakage or behavioral anomalies."""
+        alerts: list[SecurityAlert] = []
+        from datetime import datetime, timezone
+
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        # Check for leakage patterns
+        for pattern, description in self._compiled_leakage:
+            match = pattern.search(response)
+            if match:
+                alerts.append(
+                    SecurityAlert(
+                        severity=SecuritySeverity.MEDIUM,
+                        alert_type="POTENTIAL_LEAKAGE",
+                        description=description,
+                        detected_pattern=match.group()[:100],
+                        timestamp=timestamp,
+                        recommendation="Review response for sensitive information disclosure.",
+                    )
+                )
+
+        # Check for dangerous behavioral patterns
+        for pattern, description in self._compiled_behavioral:
+            match = pattern.search(response)
+            if match:
+                alerts.append(
+                    SecurityAlert(
+                        severity=SecuritySeverity.HIGH,
+                        alert_type="DANGEROUS_CONTENT",
+                        description=description,
+                        detected_pattern=match.group()[:100],
+                        timestamp=timestamp,
+                        recommendation="Verify response before using any code/commands.",
+                    )
+                )
+
+        return alerts
+
+    def analyze_temporal_patterns(self, timestamp: str) -> list[SecurityAlert]:
+        """Analyze request timing for automated attack patterns."""
+        alerts: list[SecurityAlert] = []
+        from datetime import datetime
+
+        self._request_timestamps.append(timestamp)
+
+        # Keep only last minute of timestamps
+        try:
+            current_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            cutoff = current_time.timestamp() - 60
+
+            self._request_timestamps = [
+                ts
+                for ts in self._request_timestamps
+                if datetime.fromisoformat(ts.replace("Z", "+00:00")).timestamp()
+                > cutoff
+            ]
+
+            # Check request rate
+            if len(self._request_timestamps) > self.MAX_REQUESTS_PER_MINUTE:
+                alerts.append(
+                    SecurityAlert(
+                        severity=SecuritySeverity.MEDIUM,
+                        alert_type="HIGH_REQUEST_RATE",
+                        description=f"High request rate: {len(self._request_timestamps)}/min",
+                        timestamp=timestamp,
+                        recommendation="Consider rate limiting. May indicate automated attack.",
+                    )
+                )
+
+            # Check for suspiciously fast requests
+            if len(self._request_timestamps) >= 2:
+                prev_time = datetime.fromisoformat(
+                    self._request_timestamps[-2].replace("Z", "+00:00")
+                )
+                interval_ms = (current_time - prev_time).total_seconds() * 1000
+
+                if interval_ms < self.MIN_REQUEST_INTERVAL_MS:
+                    alerts.append(
+                        SecurityAlert(
+                            severity=SecuritySeverity.LOW,
+                            alert_type="RAPID_REQUESTS",
+                            description=f"Rapid request interval: {interval_ms:.0f}ms",
+                            timestamp=timestamp,
+                            recommendation="May indicate automated tool. Monitor for patterns.",
+                        )
+                    )
+
+        except (ValueError, AttributeError):
+            pass  # Skip temporal analysis if timestamp parsing fails
+
+        return alerts
+
+    def analyze_full_exchange(
+        self, prompt: str, response: str, timestamp: str | None = None
+    ) -> list[SecurityAlert]:
+        """Perform full security analysis of a prompt/response exchange."""
+        from datetime import datetime, timezone
+
+        if timestamp is None:
+            timestamp = datetime.now(timezone.utc).isoformat()
+
+        all_alerts: list[SecurityAlert] = []
+
+        # Analyze prompt
+        all_alerts.extend(self.analyze_prompt(prompt))
+
+        # Analyze response
+        all_alerts.extend(self.analyze_response(response, prompt))
+
+        # Analyze timing
+        all_alerts.extend(self.analyze_temporal_patterns(timestamp))
+
+        # Store alerts
+        self._alert_history.extend(all_alerts)
+
+        return all_alerts
+
+    def get_alert_history(self) -> list[SecurityAlert]:
+        """Get all historical security alerts."""
+        return self._alert_history.copy()
+
+    def get_alerts_by_severity(
+        self, min_severity: SecuritySeverity
+    ) -> list[SecurityAlert]:
+        """Get alerts at or above a severity level."""
+        severity_order = [
+            SecuritySeverity.LOW,
+            SecuritySeverity.MEDIUM,
+            SecuritySeverity.HIGH,
+            SecuritySeverity.CRITICAL,
+        ]
+        min_index = severity_order.index(min_severity)
+        return [
+            a
+            for a in self._alert_history
+            if severity_order.index(a.severity) >= min_index
+        ]
+
+    def clear_history(self) -> None:
+        """Clear alert history."""
+        self._alert_history.clear()
+        self._request_timestamps.clear()
+
+
 class RateLimiter:
     """Token bucket rate limiter with per-provider limits"""
 
@@ -4132,6 +4411,7 @@ class AIOrchestrator:
         self.conversation_history: list[dict[str, Any]] = []
         self._max_history_messages = 75
         self.compaction_summaries: list[CompactionResult] = []
+        self.security_analyzer = SecurityAnalyzer()
 
         # Load config first so we can use it for logging setup
         self._user_config = self._load_user_config()
@@ -5153,8 +5433,21 @@ class AIOrchestrator:
                         # Wrap ChainedResponse in APIResponse for backward compatibility
                         chain_model = f"chain:{','.join(s.model_key for s in chained_response.steps)}"
                         chain_attribution = f"\n\n---\n*[Generated by {chain_model}]*"
+                        chain_content = (
+                            chained_response.final_content + chain_attribution
+                        )
+
+                        # Post-incident security analysis for chained response
+                        chain_alerts = self.security_analyzer.analyze_full_exchange(
+                            prompt=prompt,
+                            response=chain_content,
+                            timestamp=chain_timestamp,
+                        )
+                        if chain_alerts:
+                            self._log_security_alerts(chain_alerts, prompt)
+
                         return APIResponse(
-                            content=chained_response.final_content + chain_attribution,
+                            content=chain_content,
                             model=chain_model,
                             provider="chained",
                             timestamp=chain_timestamp,
@@ -5384,6 +5677,16 @@ class AIOrchestrator:
                         self.conversation_history = self.conversation_history[
                             -self._max_history_messages :
                         ]
+
+                # Post-incident security analysis
+                security_alerts = self.security_analyzer.analyze_full_exchange(
+                    prompt=prompt,
+                    response=response.content,
+                    timestamp=response_timestamp,
+                )
+                if security_alerts:
+                    self._log_security_alerts(security_alerts, prompt)
+
             return response
         except Exception as e:
             logger.error(f"Query failed after retries: {e}")
@@ -5398,6 +5701,55 @@ class AIOrchestrator:
                 success=False,
                 error=f"An unexpected error occurred: {e}",
             )
+
+    def _log_security_alerts(self, alerts: list[SecurityAlert], prompt: str) -> None:
+        """Log security alerts with appropriate severity levels."""
+        for alert in alerts:
+            # Sanitize prompt for logging (don't log full prompt)
+            prompt_preview = InputValidator.sanitize_for_logging(prompt, max_len=50)
+
+            log_message = (
+                f"SECURITY ALERT [{alert.severity.value}] "
+                f"Type: {alert.alert_type} | "
+                f"Description: {alert.description}"
+            )
+
+            if alert.detected_pattern:
+                log_message += f" | Pattern: '{alert.detected_pattern[:50]}...'"
+
+            if alert.recommendation:
+                log_message += f" | Action: {alert.recommendation}"
+
+            log_message += f" | Prompt preview: '{prompt_preview}'"
+
+            # Log at appropriate level based on severity
+            if alert.severity == SecuritySeverity.CRITICAL:
+                logger.critical(log_message)
+            elif alert.severity == SecuritySeverity.HIGH:
+                logger.error(log_message)
+            elif alert.severity == SecuritySeverity.MEDIUM:
+                logger.warning(log_message)
+            else:
+                logger.info(log_message)
+
+    def get_security_alerts(
+        self, min_severity: SecuritySeverity | None = None
+    ) -> list[SecurityAlert]:
+        """Get security alerts from the analyzer.
+
+        Args:
+            min_severity: Minimum severity level to include. If None, returns all.
+
+        Returns:
+            List of SecurityAlert objects.
+        """
+        if min_severity is None:
+            return self.security_analyzer.get_alert_history()
+        return self.security_analyzer.get_alerts_by_severity(min_severity)
+
+    def clear_security_alerts(self) -> None:
+        """Clear security alert history."""
+        self.security_analyzer.clear_history()
 
     def clear_history(self) -> None:
         """Clear conversation history"""
