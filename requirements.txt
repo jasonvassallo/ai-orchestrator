@@ -27,7 +27,7 @@ tqdm>=4.66.3
 midiutil>=1.2.1
 
 # Secure credential storage
-cryptography>=43.0.1
+cryptography>=46.0.3
 keyring>=24.0.0
 
 # GUI Application (native Mac app)
