@@ -124,7 +124,8 @@ class StatusWidget(Static):
     def set_status(self, text: str) -> None:
         """Update the status text."""
         self._status_text = text
-        self._update_display()
+        # Use call_later to ensure update happens in Textual's event loop
+        self.call_later(self._update_display)
 
 
 class ExportScreen(Screen):
@@ -257,6 +258,18 @@ class ChatScreen(Screen):
     .assistant-message {
         background: #2D2D2D;
         border-left: thick #4EC9B0;
+    }
+
+    .system-message {
+        background: #1E3A5F;
+        border-left: thick #569CD6;
+    }
+
+    #loading, #compact-status {
+        padding: 1;
+        margin-bottom: 1;
+        background: #2B3E50;
+        border-left: thick #FFD700;
     }
 
     #controls {
