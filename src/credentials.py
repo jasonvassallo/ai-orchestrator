@@ -520,7 +520,7 @@ def configure_credentials_interactive() -> None:
 
     providers = [
         ("openai", "OpenAI (GPT-4o, o1, o3)"),
-        ("anthropic", "Anthropic (Claude Opus 4.5, Sonnet 4.5)"),
+        ("anthropic", "Anthropic (Claude Opus 4.6, Sonnet 4.5)"),
         ("google", "Google (Gemini 2.0, 2.5)"),
         ("mistral", "Mistral (Codestral, Mistral Large)"),
         ("xai", "xAI (Grok 2)"),

@@ -10,14 +10,13 @@
  * - Audit logging
  * 
  * @author AI Orchestrator Team
- * @version 2.0.0
+ * @version 2.1.0
  */
 
 const vscode = require('vscode');
 const https = require('https');
-const http = require('http');
 const { spawn } = require('child_process');
-const path = require('path');
+const MODELS = require('../model-catalog.json');
 
 /**
  * Secure credential manager using VS Code's built-in SecretStorage
@@ -194,109 +193,6 @@ class RateLimiter {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 }
-
-/**
- * Model registry with current model information
- */
-const MODELS = {
-    // OpenAI Models
-    'gpt-4o': {
-        name: 'GPT-4o',
-        provider: 'openai',
-        modelId: 'gpt-4o',
-        contextWindow: 128000,
-        costPer1kInput: 0.005,
-        costPer1kOutput: 0.015,
-        strengths: ['speed', 'multimodal', 'general purpose'],
-        taskTypes: ['general', 'code', 'reasoning', 'multimodal'],
-    },
-    'gpt-4o-mini': {
-        name: 'GPT-4o Mini',
-        provider: 'openai',
-        modelId: 'gpt-4o-mini',
-        contextWindow: 128000,
-        costPer1kInput: 0.00015,
-        costPer1kOutput: 0.0006,
-        strengths: ['cost-effective', 'fast'],
-        taskTypes: ['general', 'summarization'],
-    },
-    'o1': {
-        name: 'o1',
-        provider: 'openai',
-        modelId: 'o1',
-        contextWindow: 200000,
-        costPer1kInput: 0.015,
-        costPer1kOutput: 0.06,
-        strengths: ['deep reasoning', 'math', 'complex problems'],
-        taskTypes: ['reasoning', 'math', 'code'],
-    },
-    
-    // Anthropic Models
-    'claude-opus-4.6': {
-        name: 'Claude Opus 4.6',
-        provider: 'anthropic',
-        modelId: 'claude-opus-4-6',
-        contextWindow: 200000,
-        costPer1kInput: 0.015,
-        costPer1kOutput: 0.075,
-        strengths: ['most intelligent', 'coding', 'nuanced writing'],
-        taskTypes: ['code', 'reasoning', 'creative', 'long-context'],
-    },
-    'claude-sonnet-4.5': {
-        name: 'Claude Sonnet 4.5',
-        provider: 'anthropic',
-        modelId: 'claude-sonnet-4-5-20250929',
-        contextWindow: 200000,
-        costPer1kInput: 0.003,
-        costPer1kOutput: 0.015,
-        strengths: ['balanced', 'coding', 'fast'],
-        taskTypes: ['code', 'general', 'reasoning'],
-    },
-    'claude-haiku-4.5': {
-        name: 'Claude Haiku 4.5',
-        provider: 'anthropic',
-        modelId: 'claude-haiku-4-5-20251001',
-        contextWindow: 200000,
-        costPer1kInput: 0.0008,
-        costPer1kOutput: 0.004,
-        strengths: ['very fast', 'cost-effective'],
-        taskTypes: ['general', 'summarization'],
-    },
-    
-    // Google Models
-    'gemini-2.0-flash': {
-        name: 'Gemini 2.0 Flash',
-        provider: 'google',
-        modelId: 'gemini-2.0-flash',
-        contextWindow: 1000000,
-        costPer1kInput: 0.0001,
-        costPer1kOutput: 0.0004,
-        strengths: ['massive context', 'speed', 'multimodal'],
-        taskTypes: ['general', 'multimodal', 'long-context'],
-    },
-    
-    // Local Models (Ollama)
-    'llama3.2': {
-        name: 'Llama 3.2',
-        provider: 'ollama',
-        modelId: 'llama3.2',
-        contextWindow: 128000,
-        costPer1kInput: 0,
-        costPer1kOutput: 0,
-        strengths: ['free', 'private', 'offline'],
-        taskTypes: ['general', 'local'],
-    },
-    'deepseek-coder-v2': {
-        name: 'DeepSeek Coder V2',
-        provider: 'ollama',
-        modelId: 'deepseek-coder-v2',
-        contextWindow: 128000,
-        costPer1kInput: 0,
-        costPer1kOutput: 0,
-        strengths: ['excellent coding', 'free', 'private'],
-        taskTypes: ['code', 'local'],
-    },
-};
 
 /**
  * Task classifier using keyword matching
@@ -508,42 +404,52 @@ class AnthropicProvider {
     }
 }
 
-class OllamaProvider {
-    constructor() {
-        this.name = 'ollama';
-        this.baseUrl = 'http://localhost:11434';
+class MistralProvider {
+    constructor(credentialManager) {
+        this.credentialManager = credentialManager;
+        this.name = 'mistral';
     }
 
     async complete(messages, modelId, options = {}) {
+        const apiKey = await this.credentialManager.getApiKey('mistral');
+        if (!apiKey) {
+            throw new Error('Mistral API key not configured. Run "AI Orchestrator: Configure API Credentials"');
+        }
+
         const body = JSON.stringify({
             model: modelId,
             messages: messages,
-            stream: false,
+            max_tokens: options.maxTokens || 4096,
+            temperature: options.temperature || 0.7,
         });
 
         return new Promise((resolve, reject) => {
-            const url = new URL('/api/chat', this.baseUrl);
-            const req = http.request({
-                hostname: url.hostname,
-                port: url.port,
-                path: url.pathname,
+            const req = https.request({
+                hostname: 'api.mistral.ai',
+                port: 443,
+                path: '/v1/chat/completions',
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`,
                     'Content-Length': Buffer.byteLength(body),
                 },
-                timeout: 300000, // 5 min for local models
+                timeout: 120000,
             }, (res) => {
                 let data = '';
                 res.on('data', chunk => data += chunk);
                 res.on('end', () => {
                     try {
                         const response = JSON.parse(data);
+                        if (response.error) {
+                            reject(new Error(response.error.message || 'Mistral API error'));
+                            return;
+                        }
                         resolve({
-                            content: response.message?.content || '',
+                            content: response.choices?.[0]?.message?.content || '',
                             usage: {
-                                inputTokens: response.prompt_eval_count || 0,
-                                outputTokens: response.eval_count || 0,
+                                inputTokens: response.usage?.prompt_tokens || 0,
+                                outputTokens: response.usage?.completion_tokens || 0,
                             },
                         });
                     } catch (e) {
@@ -552,15 +458,200 @@ class OllamaProvider {
                 });
             });
 
-            req.on('error', (e) => {
-                reject(new Error(`Ollama not available: ${e.message}. Is Ollama running?`));
-            });
+            req.on('error', reject);
             req.on('timeout', () => {
                 req.destroy();
                 reject(new Error('Request timeout'));
             });
             req.write(body);
             req.end();
+        });
+    }
+}
+
+const MLX_BRIDGE_SCRIPT = `
+import asyncio
+import json
+import sys
+from src.orchestrator import AIOrchestrator
+
+payload = json.loads(sys.stdin.read() or "{}")
+
+async def run() -> None:
+    orchestrator = AIOrchestrator(
+        prefer_local=True,
+        cost_optimize=False,
+        incognito=True,
+    )
+    response = await orchestrator.query(
+        prompt=payload.get("prompt", ""),
+        system_prompt=payload.get("system_prompt") or None,
+        model_override=payload.get("model_override"),
+        max_tokens=int(payload.get("max_tokens", 4096)),
+        temperature=float(payload.get("temperature", 0.7)),
+    )
+    if not response.success:
+        print(json.dumps({"ok": False, "error": response.error or "Unknown local model error"}))
+        return
+
+    usage = response.usage if isinstance(response.usage, dict) else {}
+    print(
+        json.dumps(
+            {
+                "ok": True,
+                "content": response.content,
+                "usage": {
+                    "inputTokens": int(usage.get("input_tokens", 0)),
+                    "outputTokens": int(usage.get("output_tokens", 0)),
+                },
+            }
+        )
+    )
+
+asyncio.run(run())
+`;
+
+class MlxProvider {
+    constructor() {
+        this.name = 'mlx';
+    }
+
+    _resolveRuntimeConfig() {
+        const config = vscode.workspace.getConfiguration('ai-orchestrator');
+        const pythonExecutable = (config.get('pythonExecutable', 'python3') || 'python3').trim();
+
+        let projectPath = (config.get('pythonProjectPath', '') || '').trim();
+        if (!projectPath) {
+            projectPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+        }
+
+        if (!projectPath) {
+            throw new Error(
+                'No project path configured for MLX runtime. Set "ai-orchestrator.pythonProjectPath" in settings.'
+            );
+        }
+
+        return { pythonExecutable, projectPath };
+    }
+
+    _stringifyContent(content) {
+        if (typeof content === 'string') {
+            return content;
+        }
+        if (Array.isArray(content)) {
+            return content
+                .map((item) => {
+                    if (typeof item === 'string') {
+                        return item;
+                    }
+                    if (item && typeof item === 'object' && item.type === 'text') {
+                        return item.text || '';
+                    }
+                    try {
+                        return JSON.stringify(item);
+                    } catch {
+                        return String(item);
+                    }
+                })
+                .join('\n');
+        }
+        if (content === null || content === undefined) {
+            return '';
+        }
+        return String(content);
+    }
+
+    _extractPrompt(messages) {
+        const nonSystem = messages.filter((msg) => msg.role !== 'system');
+        if (nonSystem.length === 0) {
+            return '';
+        }
+        return nonSystem
+            .map((msg) => `${String(msg.role || 'user').toUpperCase()}: ${this._stringifyContent(msg.content)}`)
+            .join('\n\n');
+    }
+
+    _extractSystemPrompt(messages) {
+        const systemMessage = messages.find((msg) => msg.role === 'system');
+        if (!systemMessage) {
+            return '';
+        }
+        return this._stringifyContent(systemMessage.content);
+    }
+
+    async complete(messages, modelId, options = {}) {
+        const { pythonExecutable, projectPath } = this._resolveRuntimeConfig();
+        const payload = {
+            prompt: this._extractPrompt(messages),
+            system_prompt: this._extractSystemPrompt(messages),
+            model_override: modelId,
+            max_tokens: options.maxTokens || 4096,
+            temperature: options.temperature || 0.7,
+        };
+
+        return new Promise((resolve, reject) => {
+            const child = spawn(
+                pythonExecutable,
+                ['-c', MLX_BRIDGE_SCRIPT],
+                {
+                    cwd: projectPath,
+                    env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+                }
+            );
+
+            let stdout = '';
+            let stderr = '';
+
+            child.stdout.on('data', (chunk) => {
+                stdout += String(chunk);
+            });
+
+            child.stderr.on('data', (chunk) => {
+                stderr += String(chunk);
+            });
+
+            child.on('error', (err) => {
+                reject(new Error(`Failed to start local MLX runtime: ${err.message}`));
+            });
+
+            child.on('close', (code) => {
+                if (code !== 0) {
+                    reject(
+                        new Error(
+                            `Local MLX runtime failed (exit ${code}). ${stderr.trim() || 'No stderr output.'}`
+                        )
+                    );
+                    return;
+                }
+
+                let parsed;
+                try {
+                    parsed = JSON.parse(stdout.trim());
+                } catch (error) {
+                    reject(
+                        new Error(
+                            `Failed to parse local MLX response: ${error.message}. Raw output: ${stdout.trim()}`
+                        )
+                    );
+                    return;
+                }
+
+                if (!parsed.ok) {
+                    reject(new Error(parsed.error || 'Local MLX query failed.'));
+                    return;
+                }
+
+                resolve({
+                    content: parsed.content || '',
+                    usage: {
+                        inputTokens: parsed.usage?.inputTokens || 0,
+                        outputTokens: parsed.usage?.outputTokens || 0,
+                    },
+                });
+            });
+
+            child.stdin.write(JSON.stringify(payload));
+            child.stdin.end();
         });
     }
 }
@@ -575,7 +666,8 @@ class AIOrchestrator {
         this.providers = {
             openai: new OpenAIProvider(this.credentialManager),
             anthropic: new AnthropicProvider(this.credentialManager),
-            ollama: new OllamaProvider(),
+            mistral: new MistralProvider(this.credentialManager),
+            mlx: new MlxProvider(),
         };
         this.conversationHistory = [];
     }
@@ -595,7 +687,7 @@ class AIOrchestrator {
                 if (!this.providers[model.provider]) {
                     return false;
                 }
-                if (options.preferLocal && model.provider !== 'ollama') {
+                if (options.preferLocal && model.provider !== 'mlx') {
                     return false;
                 }
                 return model.taskTypes.includes(primaryTask);
@@ -775,7 +867,7 @@ function activate(context) {
         }),
 
         vscode.commands.registerCommand('ai-orchestrator.configureCredentials', async () => {
-            const providers = ['OpenAI', 'Anthropic', 'Google', 'Cohere', 'Mistral'];
+            const providers = ['OpenAI', 'Anthropic', 'Mistral'];
             const selected = await vscode.window.showQuickPick(providers, {
                 placeHolder: 'Select provider to configure',
             });

@@ -20,7 +20,7 @@
     "timeout": 120
   },
   "models": {
-    "claude-opus-4.5": {
+    "claude-opus-4.6": {
       "enabled": true,
       "priority": 90
     },
@@ -47,6 +47,14 @@
     "mlx-llama-vision-11b": {
       "enabled": true,
       "priority": 60
+    },
+    "mlx-qwen3-coder-30b": {
+      "enabled": true,
+      "priority": 78
+    },
+    "mlx-qwen3-vl-4b": {
+      "enabled": true,
+      "priority": 62
     }
   },
   "providers": {
@@ -119,15 +127,17 @@
     ],
     "creative": [
       "vertex-gemini-3-pro",
-      "claude-opus-4.5"
+      "claude-opus-4.6"
     ],
     "summarization": [
       "claude-haiku-4.5",
       "vertex-gemini-3-flash"
     ],
     "local": [
+      "mlx-qwen3-coder-30b",
       "mlx-qwen3-4b",
       "mlx-qwen2.5-coder-14b",
+      "mlx-qwen3-vl-4b",
       "mlx-llama-vision-11b",
       "mlx-ministral-14b-reasoning"
     ]

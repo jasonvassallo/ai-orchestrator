@@ -3046,10 +3046,10 @@ class ModelRegistry:
             strengths=("reasoning", "coding", "cost-effective"),
         ),
         # Anthropic Models
-        "claude-opus-4.5": ModelCapability(
-            name="Claude Opus 4.5",
+        "claude-opus-4.6": ModelCapability(
+            name="Claude Opus 4.6",
             provider="anthropic",
-            model_id="claude-opus-4-5-20251101",
+            model_id="claude-opus-4-6",
             task_types=(
                 TaskType.CODE_GENERATION,
                 TaskType.DEEP_REASONING,
@@ -3491,6 +3491,56 @@ class ModelRegistry:
                 "efficient",
             ),
             best_for=("fast coding", "daily use", "local coding"),
+            max_output_tokens=2048,
+            supports_streaming=True,
+        ),
+        "mlx-qwen3-vl-4b": ModelCapability(
+            name="MLX Qwen3 VL 4B",
+            provider="mlx",
+            model_id="mlx-community/Qwen3-VL-4B-Instruct-4bit",
+            task_types=(
+                TaskType.MULTIMODAL,
+                TaskType.LOCAL_MODEL,
+                TaskType.GENERAL_NLP,
+                TaskType.SUMMARIZATION,
+            ),
+            context_window=32768,
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            strengths=(
+                "vision",
+                "image understanding",
+                "captioning",
+                "fast",
+                "local",
+                "private",
+            ),
+            best_for=("image analysis", "captioning", "multimodal local tasks"),
+            max_output_tokens=2048,
+            supports_vision=True,
+            supports_streaming=True,
+        ),
+        "mlx-qwen3-coder-30b": ModelCapability(
+            name="MLX Qwen3 Coder 30B",
+            provider="mlx",
+            model_id="mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit",
+            task_types=(
+                TaskType.CODE_GENERATION,
+                TaskType.REASONING,
+                TaskType.LOCAL_MODEL,
+                TaskType.GENERAL_NLP,
+            ),
+            context_window=262144,
+            cost_per_1k_input=0,
+            cost_per_1k_output=0,
+            strengths=(
+                "agentic coding",
+                "complex coding",
+                "long context",
+                "local",
+                "private",
+            ),
+            best_for=("large codebases", "agentic coding", "complex debugging"),
             max_output_tokens=2048,
             supports_streaming=True,
         ),
@@ -4164,7 +4214,7 @@ Routing Rules:
 
             if not models:
                 if complexity == "complex":
-                    models = ["claude-opus-4.5"]
+                    models = ["claude-opus-4.6"]
                 elif complexity == "simple":
                     local_simple = _pick_local_simple(task_label)
                     models = local_simple or ["claude-sonnet-4.5"]
@@ -5274,7 +5324,7 @@ class AIOrchestrator:
         bonus = 0.0
 
         if complexity >= 0.75:
-            if "claude opus 4.5" in name_lower:
+            if "claude opus 4.6" in name_lower:
                 bonus += 3.0
             if "claude sonnet 4.5" in name_lower:
                 bonus += 1.0
@@ -5283,7 +5333,7 @@ class AIOrchestrator:
         elif complexity >= 0.45:
             if "claude sonnet 4.5" in name_lower:
                 bonus += 2.5
-            if "claude opus 4.5" in name_lower:
+            if "claude opus 4.6" in name_lower:
                 bonus += 1.0
             if "qwen" in name_lower and "coder" in name_lower:
                 bonus += 0.5
@@ -5292,7 +5342,7 @@ class AIOrchestrator:
                 bonus += 2.0
             if "fast" in strengths_lower or "efficient" in strengths_lower:
                 bonus += 0.5
-            if "claude opus 4.5" in name_lower:
+            if "claude opus 4.6" in name_lower:
                 bonus -= 0.5
 
         return bonus

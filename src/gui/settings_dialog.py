@@ -149,7 +149,7 @@ class SettingsDialog(QDialog):
         self.default_model.addItems(
             [
                 "Auto (Best for Task)",
-                "Claude Opus 4.5",
+                "Claude Opus 4.6",
                 "Claude Sonnet 4.5",
                 "Claude Haiku 4.5",
                 "GPT-4o",
@@ -177,13 +177,13 @@ class SettingsDialog(QDialog):
 
         self.reasoning_model = QComboBox()
         self.reasoning_model.addItems(
-            ["Auto", "Claude Opus 4.5", "o1", "DeepSeek Reasoner"]
+            ["Auto", "Claude Opus 4.6", "o1", "DeepSeek Reasoner"]
         )
         routing_layout.addRow("Reasoning Tasks:", self.reasoning_model)
 
         self.creative_model = QComboBox()
         self.creative_model.addItems(
-            ["Auto", "Claude Opus 4.5", "GPT-4o", "Gemini 1.5 Pro"]
+            ["Auto", "Claude Opus 4.6", "GPT-4o", "Gemini 1.5 Pro"]
         )
         routing_layout.addRow("Creative Tasks:", self.creative_model)
 

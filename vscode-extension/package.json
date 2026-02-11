@@ -2,7 +2,7 @@
   "name": "ai-orchestrator",
   "displayName": "AI Orchestrator",
   "description": "Intelligent multi-model AI assistant that automatically routes queries to the best AI model",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "publisher": "ai-orchestrator",
   "license": "MIT",
   "engines": {
@@ -19,9 +19,9 @@
     "gemini",
     "openai",
     "anthropic",
-    "ollama",
     "llm",
-    "assistant"
+    "assistant",
+    "mlx"
   ],
   "repository": {
     "type": "git",
@@ -108,31 +108,63 @@
             "",
             "gpt-4o",
             "gpt-4o-mini",
+            "gpt-5-pro",
+            "gpt-5.2",
+            "gpt-5.2-pro",
+            "gpt-5.2-thinking",
             "o1",
+            "o1-mini",
+            "o3",
+            "o3-pro",
+            "o4-mini",
+            "claude-haiku-4.5",
             "claude-opus-4.6",
             "claude-sonnet-4.5",
-            "claude-haiku-4.5",
-            "gemini-2.0-flash",
-            "llama3.2",
-            "deepseek-coder-v2"
+            "codestral",
+            "codestral-2",
+            "mistral-large",
+            "mistral-large-3",
+            "mistral-small",
+            "mlx-llama-vision-11b",
+            "mlx-ministral-14b-reasoning",
+            "mlx-qwen2.5-coder-14b",
+            "mlx-qwen3-4b",
+            "mlx-qwen3-coder-30b",
+            "mlx-qwen3-vl-4b"
           ],
           "enumDescriptions": [
             "Automatic (let orchestrator choose)",
-            "GPT-4o - Fast, multimodal, general purpose",
-            "GPT-4o Mini - Cost-effective for simple tasks",
-            "o1 - Deep reasoning and complex problems",
-            "Claude Opus 4.6 - Most intelligent, best for complex tasks",
-            "Claude Sonnet 4.5 - Balanced performance, great for coding",
-            "Claude Haiku 4.5 - Very fast and cost-effective",
-            "Gemini 2.0 Flash - Massive context, fast",
-            "Llama 3.2 - Free local model",
-            "DeepSeek Coder V2 - Excellent coding, free local"
+            "GPT-4o - speed, multimodal, general purpose",
+            "GPT-4o Mini - cost-effective, fast, good for simple tasks",
+            "GPT-5 Pro - most capable GPT, multimodal, coding",
+            "GPT-5.2 - general purpose, multimodal, coding",
+            "GPT-5.2 Pro - most capable GPT, multimodal, coding",
+            "GPT-5.2 Thinking - extended thinking, reasoning traces, math",
+            "o1 - deep reasoning, math, complex problems",
+            "o1-mini - reasoning, coding, cost-effective",
+            "o3 - frontier reasoning, math, complex problems",
+            "o3 Pro - ultimate reasoning, scientific research, hardest problems",
+            "o4-mini - efficient reasoning, coding, cost-effective",
+            "Claude Haiku 4.5 - very fast, cost-effective, good for simple tasks",
+            "Claude Opus 4.6 - most intelligent, coding, nuanced writing",
+            "Claude Sonnet 4.5 - balanced, coding, fast",
+            "Codestral - excellent coding, fast, specialized",
+            "Codestral 2 - excellent coding, fast, specialized",
+            "Mistral Large - coding, reasoning, multilingual",
+            "Mistral Large 3 - coding, reasoning, multilingual",
+            "Mistral Small - cost-effective, fast, efficient",
+            "MLX Llama 3.2 11B Vision - vision, document understanding, chart analysis",
+            "MLX Ministral 14B Reasoning - deep thinking, reasoning, math",
+            "MLX Qwen 2.5 Coder 14B - complex coding, debugging, refactoring",
+            "MLX Qwen3 4B - daily use, coding, fast",
+            "MLX Qwen3 Coder 30B - agentic coding, complex coding, long context",
+            "MLX Qwen3 VL 4B - vision, image understanding, captioning"
           ]
         },
         "ai-orchestrator.preferLocal": {
           "type": "boolean",
           "default": false,
-          "description": "Prefer local models (Ollama) for privacy"
+          "description": "Prefer local models (MLX) for privacy and lower latency"
         },
         "ai-orchestrator.costOptimize": {
           "type": "boolean",
@@ -158,10 +190,15 @@
           "default": "",
           "description": "Custom system prompt to use for all queries"
         },
-        "ai-orchestrator.ollamaBaseUrl": {
+        "ai-orchestrator.pythonExecutable": {
           "type": "string",
-          "default": "http://localhost:11434",
-          "description": "Base URL for Ollama server"
+          "default": "python3",
+          "description": "Python executable used to run local MLX models via src.orchestrator"
+        },
+        "ai-orchestrator.pythonProjectPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to ai-orchestrator project root (defaults to first opened workspace folder)"
         }
       }
     }

@@ -1,0 +1,48 @@
+name: Refresh VS Code Model Catalog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 14 * * 1"
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install AI Orchestrator
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Sync VS Code model catalog
+        run: python scripts/sync_vscode_model_catalog.py
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(vscode-extension): refresh model catalog"
+          title: "chore(vscode-extension): refresh model catalog"
+          body: |
+            Automated weekly refresh for VS Code extension model catalog.
+
+            Source of truth:
+            - `src/orchestrator.py` (`ModelRegistry.MODELS`)
+
+            Generated artifacts:
+            - `vscode-extension/model-catalog.json`
+            - `vscode-extension/package.json` selected model enum metadata
+          branch: codex/model-catalog-refresh
+          delete-branch: true

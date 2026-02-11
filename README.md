@@ -133,7 +133,7 @@ async def main():
     response = await orchestrator.query(
         "Review this code for bugs",
         system_prompt="You are an expert code reviewer focusing on security.",
-        model_override="claude-opus-4.5"
+        model_override="claude-opus-4.6"
     )
     print(response.content)
 
@@ -165,7 +165,7 @@ python -m src.manage_models --yes
 python -m src.manage_models --yes --no-clean
 ```
 
-It includes MLX Qwen3 4B, MLX Qwen 2.5 Coder 14B, MLX Llama 3.2 11B Vision, MLX Ministral 14B Reasoning, plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
+It includes MLX Qwen3 4B, MLX Qwen3 Coder 30B, MLX Qwen3 VL 4B, MLX Qwen 2.5 Coder 14B, MLX Llama 3.2 11B Vision, MLX Ministral 14B Reasoning, plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
 
 ## Mac Applications
 
@@ -236,7 +236,7 @@ python setup_app.py py2app
 
 | Model | Best For | Context | Strengths |
 |-------|----------|---------|-----------|
-| `claude-opus-4.5` | Complex tasks, coding | 200K | Most intelligent, nuanced writing |
+| `claude-opus-4.6` | Complex tasks, coding | 200K | Most intelligent, nuanced writing |
 | `claude-sonnet-4.5` | Everyday coding | 200K | Balanced, fast, great for code |
 | `claude-haiku-4.5` | Simple tasks | 200K | Very fast, cost-effective |
 
@@ -324,6 +324,8 @@ python setup_app.py py2app
 |-------|----------|----------|-----------|
 | `mlx-llama-vision-11b` | MLX | Apple Silicon, Vision | Vision, documents, charts, writing, 128K context |
 | `mlx-qwen3-4b` | MLX | Apple Silicon, Daily/Coding | Fast, efficient, local, private |
+| `mlx-qwen3-coder-30b` | MLX | Apple Silicon, Large/Complex Coding | Agentic coding, long context, local |
+| `mlx-qwen3-vl-4b` | MLX | Apple Silicon, Vision + Chat | Vision understanding, captioning, local |
 | `mlx-qwen2.5-coder-14b` | MLX | Apple Silicon, Coding | Strong coding, debugging, refactoring, local |
 | `mlx-ministral-14b-reasoning` | MLX | Apple Silicon, Deep Thinking | Reasoning, math, STEM, local |
 
@@ -551,6 +553,10 @@ npm run package
 # Install the .vsix file in VS Code
 ```
 
+For local MLX models in the extension:
+- set `ai-orchestrator.pythonProjectPath` to the repository root
+- optionally set `ai-orchestrator.pythonExecutable` (defaults to `python3`)
+
 ### Commands
 
 | Command | Shortcut | Description |
@@ -561,6 +567,15 @@ npm run package
 | Configure Credentials | - | Set up API keys |
 | Select Model | - | Override model selection |
 | Clear History | - | Clear conversation |
+
+### Model Catalog Sync
+
+```bash
+# Regenerate VS Code model catalog from src/orchestrator.py
+python scripts/sync_vscode_model_catalog.py
+```
+
+A scheduled GitHub Action (`refresh-vscode-model-catalog.yml`) runs weekly and opens a PR when the catalog changes.
 
 ### Context Menu
 
