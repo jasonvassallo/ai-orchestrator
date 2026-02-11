@@ -2140,8 +2140,8 @@ class MLXProvider(BaseProvider):
                         )
                     return model, processor, config
 
-                result = await asyncio.to_thread(_load_vision_model)
-                self._model, self._processor, self._config = result
+                vision_result = await asyncio.to_thread(_load_vision_model)
+                self._model, self._processor, self._config = vision_result
                 logger.info("Vision model loaded successfully with mlx_vlm")
             else:
                 # Load text model with mlx_lm
@@ -2150,14 +2150,17 @@ class MLXProvider(BaseProvider):
                 def _load_model() -> Any:
                     return load(self.model_path)
 
-                result: Any = await asyncio.to_thread(_load_model)
+                text_load_result: Any = await asyncio.to_thread(_load_model)
 
-                if isinstance(result, tuple) and len(result) >= 2:
-                    self._model = result[0]
-                    self._tokenizer = result[1]
+                if (
+                    isinstance(text_load_result, tuple)
+                    and len(text_load_result) >= 2
+                ):
+                    self._model = text_load_result[0]
+                    self._tokenizer = text_load_result[1]
                 else:
                     # Fallback if signature matches expectation exactly
-                    self._model, self._tokenizer = result
+                    self._model, self._tokenizer = text_load_result
 
             self._available = True
             self._last_error = None
@@ -2273,8 +2276,8 @@ class MLXProvider(BaseProvider):
                     )
                     prompt = "\n".join(text_parts).strip() or "Hello."
 
-                    def _generate_text():
-                        result = vlm_generate_func(
+                    def _generate_vision_text_only() -> tuple[str, int, int]:
+                        text_result = vlm_generate_func(
                             self._model,
                             self._processor,
                             prompt,
@@ -2282,18 +2285,22 @@ class MLXProvider(BaseProvider):
                             max_tokens=kwargs.get("max_tokens", 2048),
                             verbose=False,
                         )
-                        text = result.text if hasattr(result, "text") else str(result)
+                        text = (
+                            text_result.text
+                            if hasattr(text_result, "text")
+                            else str(text_result)
+                        )
                         return (
                             text,
-                            getattr(result, "prompt_tokens", 0),
-                            getattr(result, "generation_tokens", 0),
+                            getattr(text_result, "prompt_tokens", 0),
+                            getattr(text_result, "generation_tokens", 0),
                         )
 
                     (
                         response_text,
                         vision_input_tokens,
                         vision_output_tokens,
-                    ) = await asyncio.to_thread(_generate_text)
+                    ) = await asyncio.to_thread(_generate_vision_text_only)
                 else:
                     prompt = (
                         " ".join(text_parts) if text_parts else "Describe this image."
@@ -2305,8 +2312,8 @@ class MLXProvider(BaseProvider):
                         num_images=len(images),
                     )
 
-                    def _generate_vision():
-                        result = vlm_generate_func(
+                    def _generate_vision() -> tuple[str, int, int]:
+                        vision_result = vlm_generate_func(
                             self._model,
                             self._processor,
                             formatted_prompt,
@@ -2314,11 +2321,15 @@ class MLXProvider(BaseProvider):
                             max_tokens=kwargs.get("max_tokens", 2048),
                             verbose=False,
                         )
-                        text = result.text if hasattr(result, "text") else str(result)
+                        text = (
+                            vision_result.text
+                            if hasattr(vision_result, "text")
+                            else str(vision_result)
+                        )
                         return (
                             text,
-                            getattr(result, "prompt_tokens", 0),
-                            getattr(result, "generation_tokens", 0),
+                            getattr(vision_result, "prompt_tokens", 0),
+                            getattr(vision_result, "generation_tokens", 0),
                         )
 
                     (
@@ -5952,9 +5963,30 @@ async def main() -> None:
         "--list-models", action="store_true", help="List available models"
     )
     parser.add_argument(
+        "--music",
+        action="store_true",
+        help="Generate music files with MusicGen and MIDI outputs",
+    )
+    parser.add_argument(
+        "--music-model",
+        default="musicgen-small",
+        help="MusicGen model key (for --music mode)",
+    )
+    parser.add_argument(
+        "--music-duration",
+        type=int,
+        default=5,
+        help="Music duration in seconds (for --music mode, max 30)",
+    )
+    parser.add_argument(
         "--output",
         "-o",
         help="Export response to file (markdown or json based on extension)",
+    )
+    parser.add_argument(
+        "--max-tokens",
+        type=int,
+        help="Override maximum output tokens for response generation",
     )
     parser.add_argument(
         "--incognito",
@@ -5985,6 +6017,37 @@ async def main() -> None:
             print(f"  Strengths: {', '.join(model.strengths)}")
         return
 
+    if args.music:
+        if not args.prompt:
+            parser.error("prompt is required when using --music")
+
+        import importlib
+
+        music_module = importlib.import_module("src.music")
+        musicgen_models = music_module.MUSICGEN_MODELS
+        if args.music_model not in musicgen_models:
+            parser.error(
+                f"Unknown --music-model '{args.music_model}'. "
+                f"Use one of: {', '.join(sorted(musicgen_models.keys()))}"
+            )
+
+        duration = max(1, min(args.music_duration, 30))
+        params = music_module.MusicParameters(
+            prompt=args.prompt,
+            duration=duration,
+            musicgen_model=args.music_model,
+            output_format="all",
+        )
+
+        with console.status("[cyan]Generating music...", spinner="dots"):
+            result = await music_module.generate_music(params)
+
+        if result.get("success"):
+            console.print(music_module.format_music_result(result))
+        else:
+            console.print(f"[red]{result.get('message', 'Music generation failed')}[/]")
+        return
+
     if not args.prompt:
         parser.print_help()
         return
@@ -6007,11 +6070,14 @@ async def main() -> None:
     # Execute query with animated status
     with console.status("[cyan]Initializing...", spinner="dots") as status:
         status_handle = status
-        response = await orchestrator.query(
-            prompt=args.prompt,
-            model_override=args.model,
-            status_callback=on_status,
-        )
+        query_kwargs: dict[str, Any] = {
+            "prompt": args.prompt,
+            "model_override": args.model,
+            "status_callback": on_status,
+        }
+        if args.max_tokens is not None:
+            query_kwargs["max_tokens"] = args.max_tokens
+        response = await orchestrator.query(**query_kwargs)
 
     if response.success:
         console.print(

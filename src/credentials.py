@@ -21,30 +21,45 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from cryptography.fernet import Fernet as CryptoFernet
 
 # Cryptography imports with fallback
+_Fernet: type[CryptoFernet] | None
+_hashes: ModuleType | None
+_PBKDF2HMAC: type[Any] | None
+
 try:
-    from cryptography.fernet import Fernet as _Fernet
-    from cryptography.hazmat.primitives import hashes as _hashes
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC as _PBKDF2HMAC
+    from cryptography.fernet import Fernet as _fernet_class
+    from cryptography.hazmat.primitives import hashes as _hashes_module
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import (
+        PBKDF2HMAC as _pbkdf2hmac_class,
+    )
 except ImportError:
     _Fernet = None
     _hashes = None
     _PBKDF2HMAC = None
+else:
+    _Fernet = _fernet_class
+    _hashes = _hashes_module
+    _PBKDF2HMAC = _pbkdf2hmac_class
 
 CRYPTO_AVAILABLE = (
     _Fernet is not None and _hashes is not None and _PBKDF2HMAC is not None
 )
 
 # Keyring import with fallback
+_keyring: ModuleType | None
+
 try:
-    import keyring as _keyring
+    import keyring as _keyring_module
 except ImportError:
     _keyring = None
+else:
+    _keyring = _keyring_module
 
 KEYRING_AVAILABLE = _keyring is not None
 
@@ -126,7 +141,8 @@ class KeyringBackend(CredentialBackend):
             return None
         try:
             assert _keyring is not None
-            return _keyring.get_password(SERVICE_NAME, provider)
+            value = _keyring.get_password(SERVICE_NAME, provider)
+            return value if isinstance(value, str) else None
         except Exception as e:
             logger.warning(f"Keyring get failed for {provider}: {e}")
             return None

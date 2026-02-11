@@ -20,7 +20,7 @@ Available models (all from Hugging Face):
   - facebook/musicgen-melody      (melody-conditioned)
   - facebook/musicgen-melody-large   (melody-conditioned)
 
-Requires: transformers>=4.45,<5.0, huggingface-hub>=0.34,<1.0, scipy>=1.11, torch
+Requires: transformers>=5.1,<6.0, huggingface-hub>=1.4,<2.0, scipy>=1.11, torch
 """
 
 from __future__ import annotations

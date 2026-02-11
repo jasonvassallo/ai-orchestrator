@@ -187,13 +187,17 @@
     "@types/node": "^20.10.0",
     "@types/vscode": "^1.85.0",
     "@vscode/test-electron": "^2.3.8",
-    "@vscode/vsce": "^2.22.0",
-    "eslint": "^8.55.0"
+    "@vscode/vsce": "^3.7.1",
+    "eslint": "^10.0.0"
   },
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": true
     },
     "virtualWorkspaces": true
+  },
+  "volta": {
+    "node": "24.12.0",
+    "npm": "11.6.2"
   }
 }

@@ -65,9 +65,10 @@ menubar = [
 ]
 # Local MLX models (Apple Silicon)
 mlx = [
-    "mlx-lm>=0.16.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
-    "mlx-vlm>=0.1.0; platform_system == 'Darwin' and platform_machine == 'arm64'",
-    "huggingface-hub>=0.16.4",
+    "mlx-lm>=0.30.6; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "mlx-vlm>=0.3.11; platform_system == 'Darwin' and platform_machine == 'arm64'",
+    "huggingface-hub>=1.4.1,<2.0",
+    "transformers>=5.1.0,<6.0",
 ]
 # All UI options
 ui = [

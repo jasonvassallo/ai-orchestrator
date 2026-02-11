@@ -443,6 +443,16 @@ In the GUI app, click the **Music** toggle and configure:
 - Duration
 - **AI Model** (MusicGen variant: small/medium/large, stereo, melody)
 
+You can also use the built-in CLI:
+
+```bash
+./.venv/bin/python -m src.orchestrator \
+  "90s tech house groove, 126 BPM, deep bassline" \
+  --music \
+  --music-model musicgen-small \
+  --music-duration 5
+```
+
 Generated files are saved to `~/Music/AI Orchestrator/` and can be opened in:
 - Logic Pro
 - Ableton Live
@@ -457,10 +467,10 @@ pip install midiutil
 
 # For AI audio generation (optional)
 # Recommended in a separate venv; see MUSICGEN.md
-pip install torch "transformers>=4.45,<5.0" scipy accelerate
+pip install torch "transformers>=5.1,<6.0" "huggingface-hub>=1.4,<2.0" scipy accelerate
+```
 
-If you see a MusicGen error like `MusicgenDecoderConfig has no attribute 'decoder'`,
-see MUSICGEN.md for compatible version combos and dedicated venv setup.
+For dedicated MusicGen environment setup and troubleshooting, see MUSICGEN.md.
 
 ### MLX Smart Cache Tips
 
@@ -483,7 +493,6 @@ Always prefer the project venv for running and testing:
 ```
 
 This ensures consistent dependencies (e.g., MLX, Transformers) and avoids mixing with user-level Python.
-```
 
 ## Configuration
 
