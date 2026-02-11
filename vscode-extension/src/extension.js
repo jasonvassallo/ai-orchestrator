@@ -232,10 +232,10 @@ const MODELS = {
     },
     
     // Anthropic Models
-    'claude-opus-4.5': {
-        name: 'Claude Opus 4.5',
+    'claude-opus-4.6': {
+        name: 'Claude Opus 4.6',
         provider: 'anthropic',
-        modelId: 'claude-opus-4-5-20251101',
+        modelId: 'claude-opus-4-6',
         contextWindow: 200000,
         costPer1kInput: 0.015,
         costPer1kOutput: 0.075,
@@ -592,6 +592,9 @@ class AIOrchestrator {
         // Filter models by task type
         const candidates = Object.entries(MODELS)
             .filter(([_, model]) => {
+                if (!this.providers[model.provider]) {
+                    return false;
+                }
                 if (options.preferLocal && model.provider !== 'ollama') {
                     return false;
                 }
@@ -704,6 +707,31 @@ function activate(context) {
     outputChannel = vscode.window.createOutputChannel('AI Orchestrator');
     orchestrator = new AIOrchestrator(context);
 
+    const getConfiguredQueryOptions = (overrides = {}) => {
+        const config = vscode.workspace.getConfiguration('ai-orchestrator');
+        const selectedModel = (config.get('selectedModel', '') || '').trim();
+        const options = {
+            preferLocal: config.get('preferLocal', false),
+            costOptimize: config.get('costOptimize', false),
+            maxTokens: config.get('maxTokens', 4096),
+            temperature: config.get('temperature', 0.7),
+            systemPrompt: config.get('systemPrompt', ''),
+        };
+
+        if (selectedModel && MODELS[selectedModel]) {
+            const selectedProvider = MODELS[selectedModel].provider;
+            if (orchestrator.providers[selectedProvider]) {
+                options.modelOverride = selectedModel;
+            } else {
+                outputChannel.appendLine(
+                    `[Warning] Selected model "${selectedModel}" uses unsupported provider "${selectedProvider}". Falling back to auto-routing.`
+                );
+            }
+        }
+
+        return { ...options, ...overrides };
+    };
+
     // Register commands
     const commands = [
         vscode.commands.registerCommand('ai-orchestrator.query', async () => {
@@ -718,7 +746,10 @@ function activate(context) {
                 outputChannel.show();
                 outputChannel.appendLine(`\n[Query] ${InputValidator.sanitizeForLogging(prompt, 200)}`);
 
-                const response = await orchestrator.query(prompt);
+                const response = await orchestrator.query(
+                    prompt,
+                    getConfiguredQueryOptions()
+                );
 
                 outputChannel.appendLine(`[${response.model}] (${response.latencyMs}ms)`);
                 outputChannel.appendLine('-'.repeat(60));
@@ -768,12 +799,24 @@ function activate(context) {
         }),
 
         vscode.commands.registerCommand('ai-orchestrator.selectModel', async () => {
-            const models = Object.entries(MODELS).map(([key, model]) => ({
-                label: model.name,
-                description: `${model.provider} - ${model.strengths.join(', ')}`,
-                detail: `$${model.costPer1kInput}/1k input, $${model.costPer1kOutput}/1k output`,
-                key: key,
-            }));
+            const config = vscode.workspace.getConfiguration('ai-orchestrator');
+            const currentModel = (config.get('selectedModel', '') || '').trim();
+            const models = [
+                {
+                    label: 'Automatic',
+                    description: 'Use auto-routing based on task classification',
+                    detail: 'No forced model override',
+                    key: '',
+                },
+                ...Object.entries(MODELS)
+                    .filter(([_, model]) => Boolean(orchestrator.providers[model.provider]))
+                    .map(([key, model]) => ({
+                        label: model.name,
+                        description: `${model.provider} - ${model.strengths.join(', ')}`,
+                        detail: `$${model.costPer1kInput}/1k input, $${model.costPer1kOutput}/1k output`,
+                        key: key,
+                    })),
+            ];
 
             const selected = await vscode.window.showQuickPick(models, {
                 placeHolder: 'Select a model',
@@ -781,9 +824,13 @@ function activate(context) {
 
             if (selected) {
                 // Store selection in workspace settings
-                await vscode.workspace.getConfiguration('ai-orchestrator')
-                    .update('selectedModel', selected.key, vscode.ConfigurationTarget.Global);
-                vscode.window.showInformationMessage(`Selected model: ${selected.label}`);
+                await config.update('selectedModel', selected.key, vscode.ConfigurationTarget.Global);
+                if (!selected.key) {
+                    const current = currentModel ? ` (was ${currentModel})` : '';
+                    vscode.window.showInformationMessage(`Model selection reset to Automatic${current}`);
+                } else {
+                    vscode.window.showInformationMessage(`Selected model: ${selected.label}`);
+                }
             }
         }),
 
@@ -811,7 +858,9 @@ function activate(context) {
 
                 const response = await orchestrator.query(
                     `Explain the following code:\n\n\`\`\`\n${selection}\n\`\`\``,
-                    { systemPrompt: 'You are a helpful coding assistant. Explain code clearly and concisely.' }
+                    getConfiguredQueryOptions({
+                        systemPrompt: 'You are a helpful coding assistant. Explain code clearly and concisely.',
+                    })
                 );
 
                 outputChannel.appendLine(response.content);
@@ -836,12 +885,14 @@ function activate(context) {
             try {
                 outputChannel.show();
                 outputChannel.appendLine('\n[Improve Code]');
+                const configuredOptions = getConfiguredQueryOptions();
 
                 const response = await orchestrator.query(
                     `Improve the following code for better performance, readability, and security. Provide the improved code with explanations:\n\n\`\`\`\n${selection}\n\`\`\``,
-                    { 
+                    {
+                        ...configuredOptions,
                         systemPrompt: 'You are an expert code reviewer. Improve code for performance, security, and readability.',
-                        modelOverride: 'claude-sonnet-4.5',  // Use Claude for coding tasks
+                        modelOverride: configuredOptions.modelOverride || 'claude-sonnet-4.5',
                     }
                 );
 
