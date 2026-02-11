@@ -113,8 +113,8 @@ def _update_package_json(catalog: dict[str, dict[str, Any]]) -> None:
     properties.pop("ai-orchestrator.ollamaBaseUrl", None)
     properties["ai-orchestrator.pythonExecutable"] = {
         "type": "string",
-        "default": "python3",
-        "description": "Python executable used to run local MLX models via src.orchestrator",
+        "default": "",
+        "description": "Python executable for local MLX queries (auto-detects .venv when empty)",
     }
     properties["ai-orchestrator.pythonProjectPath"] = {
         "type": "string",

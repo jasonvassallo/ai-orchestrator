@@ -10,12 +10,14 @@
  * - Audit logging
  * 
  * @author AI Orchestrator Team
- * @version 2.1.0
+ * @version 2.1.1
  */
 
 const vscode = require('vscode');
 const https = require('https');
 const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
 const MODELS = require('../model-catalog.json');
 
 /**
@@ -518,7 +520,7 @@ class MlxProvider {
 
     _resolveRuntimeConfig() {
         const config = vscode.workspace.getConfiguration('ai-orchestrator');
-        const pythonExecutable = (config.get('pythonExecutable', 'python3') || 'python3').trim();
+        const configuredPython = (config.get('pythonExecutable', '') || '').trim();
 
         let projectPath = (config.get('pythonProjectPath', '') || '').trim();
         if (!projectPath) {
@@ -531,7 +533,19 @@ class MlxProvider {
             );
         }
 
-        return { pythonExecutable, projectPath };
+        const venvPythonUnix = path.join(projectPath, '.venv', 'bin', 'python');
+        const venvPythonWindows = path.join(projectPath, '.venv', 'Scripts', 'python.exe');
+        const venvPython = fs.existsSync(venvPythonUnix)
+            ? venvPythonUnix
+            : (fs.existsSync(venvPythonWindows) ? venvPythonWindows : '');
+        const pythonExecutable = configuredPython || venvPython || 'python3';
+
+        return {
+            pythonExecutable,
+            projectPath,
+            configuredPython,
+            venvPython,
+        };
     }
 
     _stringifyContent(content) {
@@ -579,16 +593,7 @@ class MlxProvider {
         return this._stringifyContent(systemMessage.content);
     }
 
-    async complete(messages, modelId, options = {}) {
-        const { pythonExecutable, projectPath } = this._resolveRuntimeConfig();
-        const payload = {
-            prompt: this._extractPrompt(messages),
-            system_prompt: this._extractSystemPrompt(messages),
-            model_override: modelId,
-            max_tokens: options.maxTokens || 4096,
-            temperature: options.temperature || 0.7,
-        };
-
+    _runBridge(pythonExecutable, projectPath, payload) {
         return new Promise((resolve, reject) => {
             const child = spawn(
                 pythonExecutable,
@@ -611,14 +616,14 @@ class MlxProvider {
             });
 
             child.on('error', (err) => {
-                reject(new Error(`Failed to start local MLX runtime: ${err.message}`));
+                reject(new Error(`Failed to start local MLX runtime (${pythonExecutable}): ${err.message}`));
             });
 
             child.on('close', (code) => {
                 if (code !== 0) {
                     reject(
                         new Error(
-                            `Local MLX runtime failed (exit ${code}). ${stderr.trim() || 'No stderr output.'}`
+                            `Local MLX runtime failed (exit ${code}) using "${pythonExecutable}". ${stderr.trim() || 'No stderr output.'}`
                         )
                     );
                     return;
@@ -653,6 +658,34 @@ class MlxProvider {
             child.stdin.write(JSON.stringify(payload));
             child.stdin.end();
         });
+    }
+
+    async complete(messages, modelId, options = {}) {
+        const { pythonExecutable, projectPath, configuredPython, venvPython } = this._resolveRuntimeConfig();
+        const payload = {
+            prompt: this._extractPrompt(messages),
+            system_prompt: this._extractSystemPrompt(messages),
+            model_override: modelId,
+            max_tokens: options.maxTokens || 4096,
+            temperature: options.temperature || 0.7,
+        };
+
+        try {
+            return await this._runBridge(pythonExecutable, projectPath, payload);
+        } catch (primaryError) {
+            const errorMessage = String(primaryError?.message || primaryError || '');
+            const canRetryWithVenv =
+                Boolean(venvPython) &&
+                pythonExecutable !== venvPython &&
+                !configuredPython &&
+                errorMessage.includes('ModuleNotFoundError');
+
+            if (canRetryWithVenv) {
+                return this._runBridge(venvPython, projectPath, payload);
+            }
+
+            throw primaryError;
+        }
     }
 }
 

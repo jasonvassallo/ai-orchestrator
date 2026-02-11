@@ -2,7 +2,7 @@
   "name": "ai-orchestrator",
   "displayName": "AI Orchestrator",
   "description": "Intelligent multi-model AI assistant that automatically routes queries to the best AI model",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "publisher": "ai-orchestrator",
   "license": "MIT",
   "engines": {
@@ -192,8 +192,8 @@
         },
         "ai-orchestrator.pythonExecutable": {
           "type": "string",
-          "default": "python3",
-          "description": "Python executable used to run local MLX models via src.orchestrator"
+          "default": "",
+          "description": "Python executable for local MLX queries (auto-detects .venv when empty)"
         },
         "ai-orchestrator.pythonProjectPath": {
           "type": "string",
