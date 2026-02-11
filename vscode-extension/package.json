@@ -2,7 +2,7 @@
   "name": "ai-orchestrator",
   "displayName": "AI Orchestrator",
   "description": "Intelligent multi-model AI assistant that automatically routes queries to the best AI model",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "ai-orchestrator",
   "license": "MIT",
   "engines": {
@@ -28,7 +28,14 @@
     "url": "https://github.com/jasonvassallo/ai-orchestrator"
   },
   "icon": "images/icon.png",
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:ai-orchestrator.query",
+    "onCommand:ai-orchestrator.configureCredentials",
+    "onCommand:ai-orchestrator.selectModel",
+    "onCommand:ai-orchestrator.clearHistory",
+    "onCommand:ai-orchestrator.explainCode",
+    "onCommand:ai-orchestrator.improveCode"
+  ],
   "main": "./src/extension.js",
   "contributes": {
     "commands": [
