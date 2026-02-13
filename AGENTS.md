@@ -6,21 +6,21 @@ The core Python package lives in `src/`, with `src/orchestrator.py` as the main 
 
 ## Build, Test, and Development Commands
 
-- `pip install -e "."` installs the minimal CLI-only dependencies.
-- `pip install -e ".[dev]"` installs test, lint, and type-check tooling.
-- `pip install -e ".[all]"` installs all providers and UI dependencies.
-- `python -m src.orchestrator "..."` or `ai-orchestrator "..."` runs the CLI.
+- `uv sync` installs the minimal CLI-only dependencies from `uv.lock`.
+- `uv sync --extra dev` installs test, lint, and type-check tooling.
+- `uv sync --extra all --extra dev` installs all providers, UI, and dev tooling.
+- `uv run python -m src.orchestrator "..."` or `ai-orchestrator "..."` runs the CLI.
 - `ai-app`, `ai-chat`, and `ai-menubar` run the GUI, TUI, and menu bar apps.
-- `python -m src.gui.app`, `python -m src.tui.app`, `python -m src.menubar.app` run UI apps directly.
-- `python -m src.manage_models` manages local model cache (disk cleanup).
-- `python -m src.credentials` or `ai-configure` configures API credentials.
-- `python setup_app.py py2app` builds the macOS `.app` bundle.
+- `uv run python -m src.gui.app`, `uv run python -m src.tui.app`, `uv run python -m src.menubar.app` run UI apps directly.
+- `uv run python -m src.manage_models` manages local model cache (disk cleanup).
+- `uv run python -m src.credentials` or `ai-configure` configures API credentials.
+- `uv run python setup_app.py py2app` builds the macOS `.app` bundle.
 - `cd vscode-extension && npm install && npm run package` builds the VS Code extension.
-- `pytest` runs all tests; `pytest --cov=src --cov-report=html` generates coverage.
-- `mypy src` runs type checks (strict for core modules).
-- `ruff check src` lints; `ruff format .` formats.
+- `uv run pytest` runs all tests; `uv run pytest --cov=src --cov-report=html` generates coverage.
+- `uv run mypy src` runs type checks (strict for core modules).
+- `uv run ruff check src` lints; `uv run ruff format .` formats.
 
-> Note: Activate the virtual environment (`source .venv/bin/activate`) before running CLI tools, or use the direct venv paths (e.g., `./.venv/bin/python`).
+> Note: Prefer `uv run ...` for commands (e.g., `uv run pytest`, `uv run mypy src`, `uv run python -m src.orchestrator "..."`).
 
 ## Architecture Overview
 

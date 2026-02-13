@@ -173,48 +173,56 @@ DRUM_NOTES = {
 MUSICGEN_MODELS = {
     "musicgen-small": {
         "id": "facebook/musicgen-small",
+        "revision": "4c8334b02c6ec4e8664a91979669a501ec497792",
         "description": "Fast, 300M params (recommended for quick generation)",
         "stereo": False,
         "melody": False,
     },
     "musicgen-medium": {
         "id": "facebook/musicgen-medium",
+        "revision": "d3bd7b00761b78ad7a8a05145ee31e7832e9916c",
         "description": "Balanced, 1.5B params",
         "stereo": False,
         "melody": False,
     },
     "musicgen-large": {
         "id": "facebook/musicgen-large",
+        "revision": "15ccdc92099879e47b6da12c350cdb71d4eab3ca",
         "description": "High quality, 3.3B params (slower)",
         "stereo": False,
         "melody": False,
     },
     "musicgen-stereo-small": {
         "id": "facebook/musicgen-stereo-small",
+        "revision": "3a110c0092820d470372c880c5ea06ce21a78ddd",
         "description": "Stereo output, 300M params",
         "stereo": True,
         "melody": False,
     },
     "musicgen-stereo-medium": {
         "id": "facebook/musicgen-stereo-medium",
+        "revision": "2747e613fbaadc43b14257224326ef58c5c11b81",
         "description": "Stereo output, 1.5B params",
         "stereo": True,
         "melody": False,
     },
     "musicgen-stereo-large": {
         "id": "facebook/musicgen-stereo-large",
+        "revision": "bda8ec330c9c17e09728589eaf678f58f7d2d932",
         "description": "Stereo output, 3.3B params",
         "stereo": True,
         "melody": False,
     },
     "musicgen-melody": {
         "id": "facebook/musicgen-melody",
+        "revision": "68d653a95788ec0d2b0abccab22c0b3a200c2d90",
         "description": "Melody-conditioned, 1.5B params",
         "stereo": False,
         "melody": True,
     },
     "musicgen-melody-large": {
         "id": "facebook/musicgen-melody-large",
+        "revision": "6fdf8d3d815995108c9bdb5183414ff464b171ac",
         "description": "Melody-conditioned, 3.3B params",
         "stereo": False,
         "melody": True,
@@ -230,6 +238,11 @@ def get_musicgen_model_choices() -> list[tuple[str, str]]:
 def get_musicgen_model_id(model_key: str) -> str:
     """Get the Hugging Face model ID for a given model key."""
     return MUSICGEN_MODELS.get(model_key, MUSICGEN_MODELS["musicgen-small"])["id"]
+
+
+def get_musicgen_model_revision(model_key: str) -> str:
+    """Get the pinned Hugging Face revision SHA for a given model key."""
+    return MUSICGEN_MODELS.get(model_key, MUSICGEN_MODELS["musicgen-small"])["revision"]
 
 
 @dataclass
@@ -723,16 +736,31 @@ async def generate_audio_with_musicgen(
     try:
         # Load selected model (try local first to avoid downloads)
         model_id = get_musicgen_model_id(params.musicgen_model)
+        revision = get_musicgen_model_revision(params.musicgen_model)
         try:
-            processor = AutoProcessor.from_pretrained(model_id, local_files_only=True)
-            model = MusicgenForConditionalGeneration.from_pretrained(
-                model_id, local_files_only=True
+            # Revisions are pinned to immutable commit SHAs via MUSICGEN_MODELS.
+            # Bandit B615 cannot resolve dynamic values, so we explicitly suppress
+            # these calls after enforcing commit pinning above.
+            processor = AutoProcessor.from_pretrained(  # nosec B615
+                model_id,
+                revision=revision,
+                local_files_only=True,
+            )
+            model = MusicgenForConditionalGeneration.from_pretrained(  # nosec B615
+                model_id,
+                revision=revision,
+                local_files_only=True,
             )
         except OSError:
             # Fallback to downloading if not found locally
             print(f"Model {model_id} not found locally. Downloading...")
-            processor = AutoProcessor.from_pretrained(model_id)
-            model = MusicgenForConditionalGeneration.from_pretrained(model_id)
+            processor = AutoProcessor.from_pretrained(  # nosec B615
+                model_id, revision=revision
+            )
+            model = MusicgenForConditionalGeneration.from_pretrained(  # nosec B615
+                model_id,
+                revision=revision,
+            )
 
         inputs = processor(
             text=[prompt],

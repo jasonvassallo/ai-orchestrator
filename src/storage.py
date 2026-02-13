@@ -227,31 +227,57 @@ class ConversationStorage:
         settings: dict[str, Any] | None = None,
     ) -> bool:
         """Update conversation metadata."""
-        updates: list[str] = []
-        params: list[Any] = []
+        has_title = title is not None
+        has_model = model is not None
+        has_settings = settings is not None
 
-        if title is not None:
-            updates.append("title = ?")
-            params.append(title)
-        if model is not None:
-            updates.append("model = ?")
-            params.append(model)
-        if settings is not None:
-            updates.append("settings = ?")
-            params.append(json.dumps(settings))
-
-        if not updates:
+        if not (has_title or has_model or has_settings):
             return False
 
-        updates.append("updated_at = ?")
-        params.append(datetime.now().isoformat())
-        params.append(conversation_id)
+        updated_at = datetime.now().isoformat()
+        params: tuple[Any, ...]
+        sql: str
+
+        if has_title and has_model and has_settings:
+            sql = (
+                "UPDATE conversations "
+                "SET title = ?, model = ?, settings = ?, updated_at = ? "
+                "WHERE id = ?"
+            )
+            params = (title, model, json.dumps(settings), updated_at, conversation_id)
+        elif has_title and has_model:
+            sql = (
+                "UPDATE conversations "
+                "SET title = ?, model = ?, updated_at = ? "
+                "WHERE id = ?"
+            )
+            params = (title, model, updated_at, conversation_id)
+        elif has_title and has_settings:
+            sql = (
+                "UPDATE conversations "
+                "SET title = ?, settings = ?, updated_at = ? "
+                "WHERE id = ?"
+            )
+            params = (title, json.dumps(settings), updated_at, conversation_id)
+        elif has_model and has_settings:
+            sql = (
+                "UPDATE conversations "
+                "SET model = ?, settings = ?, updated_at = ? "
+                "WHERE id = ?"
+            )
+            params = (model, json.dumps(settings), updated_at, conversation_id)
+        elif has_title:
+            sql = "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?"
+            params = (title, updated_at, conversation_id)
+        elif has_model:
+            sql = "UPDATE conversations SET model = ?, updated_at = ? WHERE id = ?"
+            params = (model, updated_at, conversation_id)
+        else:
+            sql = "UPDATE conversations SET settings = ?, updated_at = ? WHERE id = ?"
+            params = (json.dumps(settings), updated_at, conversation_id)
 
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                f"UPDATE conversations SET {', '.join(updates)} WHERE id = ?",  # noqa: S608
-                params,
-            )
+            cursor = conn.execute(sql, params)
             conn.commit()
             return cursor.rowcount > 0
 
@@ -319,26 +345,27 @@ class ConversationStorage:
         metadata: dict[str, Any] | None = None,
     ) -> bool:
         """Update a message's content or metadata."""
-        updates: list[str] = []
-        params: list[Any] = []
+        has_content = content is not None
+        has_metadata = metadata is not None
 
-        if content is not None:
-            updates.append("content = ?")
-            params.append(content)
-        if metadata is not None:
-            updates.append("metadata = ?")
-            params.append(json.dumps(metadata))
-
-        if not updates:
+        if not (has_content or has_metadata):
             return False
 
-        params.append(message_id)
+        params: tuple[Any, ...]
+        sql: str
+
+        if has_content and has_metadata:
+            sql = "UPDATE messages SET content = ?, metadata = ? WHERE id = ?"
+            params = (content, json.dumps(metadata), message_id)
+        elif has_content:
+            sql = "UPDATE messages SET content = ? WHERE id = ?"
+            params = (content, message_id)
+        else:
+            sql = "UPDATE messages SET metadata = ? WHERE id = ?"
+            params = (json.dumps(metadata), message_id)
 
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                f"UPDATE messages SET {', '.join(updates)} WHERE id = ?",  # noqa: S608
-                params,
-            )
+            cursor = conn.execute(sql, params)
             conn.commit()
             return cursor.rowcount > 0
 

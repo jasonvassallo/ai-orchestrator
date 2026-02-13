@@ -1,4 +1,4 @@
-# MusicGen Audio (Separate Virtual Environment)
+# MusicGen Audio (Separate uv Environment)
 
 This project uses a dedicated virtual environment for MusicGen audio generation to avoid dependency conflicts with MLX and other providers.
 
@@ -19,19 +19,18 @@ MusicGen offers several model variants with different capabilities:
 
 **Note:** Larger models require more VRAM and take longer to generate, but produce higher quality audio. The stereo models output stereo audio instead of mono.
 
-## Why a separate venv?
+## Why a separate environment?
 
 - MLX / mlx-lm currently prefers specific Transformers/HF Hub versions
 - MusicGen (Transformers-based) may require different versions
 - A separate `.music-venv` keeps both stacks stable
 
-## Create/Update the audio venv
+## Create/Update the audio environment
 
 ```bash
-python3 -m venv .music-venv
-./.music-venv/bin/python -m pip install -U pip
-# Preferred stack (Transformers 4.x)
-./.music-venv/bin/python -m pip install \
+uv venv .music-venv
+# Preferred stack (Transformers 5.x)
+uv pip install --python .music-venv/bin/python \
   "transformers>=5.1,<6.0" \
   "huggingface-hub>=1.4,<2.0" \
   "scipy>=1.11.0" \

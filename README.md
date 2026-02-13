@@ -43,21 +43,20 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 git clone https://github.com/jasonvassallo/ai-orchestrator.git
 cd ai-orchestrator
 
-# Install with all providers and GUI apps
-pip install -e ".[all]"
+# Sync environment from lockfile (recommended)
+# Uses .python-version automatically
+uv sync --extra all --extra dev
 
-# Or install specific components
-pip install -e "."                      # Minimal (CLI only)
-pip install -e ".[openai,anthropic]"    # Specific providers
-pip install -e ".[gui]"                 # Native Mac app
-pip install -e ".[tui]"                 # Terminal UI
-pip install -e ".[mlx]"                 # MLX local models (Apple Silicon)
-pip install -e ".[ui]"                  # All UI options
+# Or install specific components with uv extras
+uv sync                                 # Minimal (CLI only)
+uv sync --extra openai --extra anthropic  # Specific providers
+uv sync --extra gui                     # Native Mac app
+uv sync --extra tui                     # Terminal UI
+uv sync --extra mlx                     # MLX local models (Apple Silicon)
+uv sync --extra ui                      # All UI options
 
-# Using uv (recommended for fast Python + venv management)
-# Uses .python-version for the interpreter
-uv venv .venv
-uv pip install -e ".[all]"
+# Run commands in the project environment
+uv run python -m src.orchestrator "Hello from uv"
 ```
 
 ### Configure Credentials (REQUIRED)
@@ -66,7 +65,7 @@ uv pip install -e ".[all]"
 
 ```bash
 # Interactive configuration (recommended)
-python -m src.credentials
+uv run python -m src.credentials
 
 # Or set environment variables
 export OPENAI_API_KEY="sk-..."
@@ -91,23 +90,23 @@ export GOOGLE_CLOUD_LOCATION="global"  # or a region like us-central1
 
 ```bash
 # CLI usage
-python -m src.orchestrator "Explain quantum computing"
+uv run python -m src.orchestrator "Explain quantum computing"
 
 # With model override
-python -m src.orchestrator "Debug this Python code" --model claude-sonnet-4.5
+uv run python -m src.orchestrator "Debug this Python code" --model claude-sonnet-4.5
 
 # Prefer local models (MLX)
-python -m src.orchestrator "Summarize this text" --local
+uv run python -m src.orchestrator "Summarize this text" --local
 
 # Cost optimization mode
-python -m src.orchestrator "Write a haiku" --cheap
+uv run python -m src.orchestrator "Write a haiku" --cheap
 
 # Export response to file (markdown or JSON)
-python -m src.orchestrator "Summarize AI news" -o response.md
-python -m src.orchestrator "Explain quantum computing" -o response.json
+uv run python -m src.orchestrator "Summarize AI news" -o response.md
+uv run python -m src.orchestrator "Explain quantum computing" -o response.json
 
 # Verbose mode for debugging
-python -m src.orchestrator "Complex analysis task" --verbose
+uv run python -m src.orchestrator "Complex analysis task" --verbose
 ```
 
 ### Python API
@@ -184,7 +183,7 @@ A full-featured desktop application with:
 # Run the GUI app
 ai-app
 # or
-python -m src.gui.app
+uv run python -m src.gui.app
 ```
 
 ### Menu Bar App
@@ -199,7 +198,7 @@ Quick access from your Mac's menu bar:
 # Run the menu bar app
 ai-menubar
 # or
-python -m src.menubar.app
+uv run python -m src.menubar.app
 ```
 
 ### Terminal UI
@@ -213,7 +212,7 @@ Beautiful terminal-based interface:
 # Run the terminal UI
 ai-chat
 # or
-python -m src.tui.app
+uv run python -m src.tui.app
 ```
 
 ### Building the .app Bundle
@@ -222,10 +221,10 @@ Create a standalone macOS application:
 
 ```bash
 # Install build dependencies
-pip install -e ".[dev]"
+uv sync --extra dev
 
 # Build the .app bundle
-python setup_app.py py2app
+uv run python setup_app.py py2app
 
 # Output: dist/AI Orchestrator.app
 ```
@@ -448,7 +447,7 @@ In the GUI app, click the **Music** toggle and configure:
 You can also use the built-in CLI:
 
 ```bash
-./.venv/bin/python -m src.orchestrator \
+uv run python -m src.orchestrator \
   "90s tech house groove, 126 BPM, deep bassline" \
   --music \
   --music-model musicgen-small \
@@ -465,11 +464,11 @@ Generated files are saved to `~/Music/AI Orchestrator/` and can be opened in:
 
 ```bash
 # For MIDI generation
-pip install midiutil
+uv pip install midiutil
 
 # For AI audio generation (optional)
 # Recommended in a separate venv; see MUSICGEN.md
-pip install torch "transformers>=5.1,<6.0" "huggingface-hub>=1.4,<2.0" scipy accelerate
+uv pip install torch "transformers>=5.1,<6.0" "huggingface-hub>=1.4,<2.0" scipy accelerate
 ```
 
 For dedicated MusicGen environment setup and troubleshooting, see MUSICGEN.md.
@@ -486,12 +485,12 @@ export HF_HOME="$HOME/Library/Caches/huggingface"
   `~/Library/Caches/huggingface/hub` (and respects `HF_HOME`) for MLX snapshots
   that include `*.safetensors` shards. If found, it enables offline mode to prevent network usage.
 
-### Using the Project Virtual Environment
+### Using the Project Environment
 
-Always prefer the project venv for running and testing:
+Always prefer the project uv-managed environment for running and testing:
 
 ```bash
-./.venv/bin/python -m src.orchestrator "Hello"
+uv run python -m src.orchestrator "Hello"
 ```
 
 This ensures consistent dependencies (e.g., MLX, Transformers) and avoids mixing with user-level Python.
@@ -589,25 +588,25 @@ Right-click selected code for:
 
 ```bash
 # Install dev dependencies
-pip install -e ".[dev]"
+uv sync --extra dev
 
 # Run tests (project mytest wrapper)
-mytest() { pytest -q; }
+mytest() { uv run pytest -q; }
 mytest
 
 # Run with coverage
-pytest --cov=src --cov-report=html
+uv run pytest --cov=src --cov-report=html
 
 # Type checking
-mypy src
+uv run mypy src
 
 # Linting + formatting
-ruff check src
-ruff format --check .
+uv run ruff check src
+uv run ruff format --check .
 
 # Security scans
-bandit -q -r src scripts
-pip-audit
+uv run bandit -q -r src scripts
+uv run pip-audit
 ```
 
 ## Project Structure

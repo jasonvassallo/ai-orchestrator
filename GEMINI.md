@@ -11,83 +11,82 @@ AI Orchestrator is an intelligent multi-model AI router written in Python. It au
 ### Setup & Installation
 
 ```bash
-# Create and activate virtual environment (recommended)
-python3 -m venv .venv
-source .venv/bin/activate
+# Sync virtual environment from lockfile (recommended)
+uv sync --extra all --extra dev
 
-# Install with all features (GUI, TUI, all providers)
-pip install -e ".[all]"
+# Minimal CLI-only environment
+uv sync
 
-# Install minimal (CLI only)
-pip install -e "."
-
-# Install dev dependencies (test, lint, type-check)
-pip install -e ".[dev]"
+# Optional feature sets
+uv sync --extra mlx
+uv sync --extra gui
+uv sync --extra tui
+uv sync --extra menubar
 ```
 
-> **Note:** Always ensure your virtual environment is activated (`source .venv/bin/activate`) before running commands, or use the direct path (e.g., `./.venv/bin/python`, `./.venv/bin/ruff`).
+> **Note:** Prefer `uv run ...` to execute commands in the project environment (for example, `uv run pytest`, `uv run mypy src`, `uv run python -m src.orchestrator "hello"`).
 
 ### Running Applications
 
 ```bash
 # CLI usage
-python -m src.orchestrator "Your prompt here"
-python -m src.orchestrator "Prompt" --model claude-sonnet-4.5  # Model override
-python -m src.orchestrator "Prompt" --local                    # Prefer local (Ollama/MLX)
-python -m src.orchestrator "Prompt" --cheap                    # Cost optimize
-python -m src.orchestrator "Prompt" --verbose                  # Debug mode
-python -m src.orchestrator "Prompt" -o response.md             # Export to markdown
-python -m src.orchestrator "Prompt" -o response.json           # Export to JSON
+uv run python -m src.orchestrator "Your prompt here"
+uv run python -m src.orchestrator "Prompt" --model claude-sonnet-4.5  # Model override
+uv run python -m src.orchestrator "Prompt" --local                    # Prefer local (Ollama/MLX)
+uv run python -m src.orchestrator "Prompt" --cheap                    # Cost optimize
+uv run python -m src.orchestrator "Prompt" --verbose                  # Debug mode
+uv run python -m src.orchestrator "Prompt" -o response.md             # Export to markdown
+uv run python -m src.orchestrator "Prompt" -o response.json           # Export to JSON
 
 # GUI app
-python -m src.gui.app      # or: ai-app
+uv run python -m src.gui.app      # or: ai-app
 
 # Terminal UI
-python -m src.tui.app      # or: ai-chat
+uv run python -m src.tui.app      # or: ai-chat
 
 # Menu bar app
-python -m src.menubar.app  # or: ai-menubar
+uv run python -m src.menubar.app  # or: ai-menubar
 
 # Manage local models (cleanup/download)
-python -m src.manage_models
-python -m src.manage_models --yes           # Non-interactive download/cleanup
-python -m src.manage_models --yes --no-clean  # Skip cache cleanup
+uv run python -m src.manage_models
+uv run python -m src.manage_models --yes           # Non-interactive download/cleanup
+uv run python -m src.manage_models --yes --no-clean  # Skip cache cleanup
 
 # Configure credentials
-python -m src.credentials  # or: ai-configure
+uv run python -m src.credentials  # or: ai-configure
 ```
 
 ### Testing & Quality
 
 ```bash
 # Run all tests
-pytest
+uv run pytest
 
 # Run tests with coverage
-pytest --cov=src --cov-report=html
+uv run pytest --cov=src --cov-report=html
 
 # Run a single test file
-pytest tests/test_orchestrator.py -v
+uv run pytest tests/test_orchestrator.py -v
 
 # Run a specific test
-pytest tests/test_orchestrator.py::TestInputValidator::test_valid_prompt -v
+uv run pytest tests/test_orchestrator.py::TestInputValidator::test_valid_prompt -v
 
 # Type checking (strict for core modules)
-mypy src
+uv run mypy src
 
 # Linting
-ruff check src
+uv run ruff check src
 
 # Formatting
-ruff format .          # Apply formatting
-ruff format --check .  # Check only
+uv run ruff format .          # Apply formatting
+uv run ruff format --check .  # Check only
 ```
 
 ### Building Distributables
 
 ```bash
 # Build macOS .app bundle
-python setup_app.py py2app
+uv run python setup_app.py py2app
 
 # Build VS Code extension
 cd vscode-extension && npm install && npm run package
