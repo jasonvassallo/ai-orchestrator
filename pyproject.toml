@@ -84,6 +84,8 @@ dev = [
     "pytest-cov>=4.0.0",
     "mypy>=1.0.0",
     "ruff>=0.1.0",
+    "bandit>=1.7.0",
+    "pip-audit>=2.7.0",
     "pre-commit>=3.0.0",
     "py2app>=0.28.0",
 ]
