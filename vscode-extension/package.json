@@ -2,7 +2,7 @@
   "name": "ai-orchestrator",
   "displayName": "AI Orchestrator",
   "description": "Intelligent multi-model AI assistant that automatically routes queries to the best AI model",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "publisher": "ai-orchestrator",
   "license": "MIT",
   "engines": {

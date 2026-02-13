@@ -40,6 +40,29 @@ class SettingsDialog(QDialog):
         self._setup_ui()
         self._load_settings()
 
+    @staticmethod
+    def _available_model_names(task_types: set[str] | None = None) -> list[str]:
+        """Build display model names from the shared ModelRegistry."""
+        from ..orchestrator import LOCAL_PROVIDERS, ModelRegistry
+
+        entries: list[tuple[int, str, str]] = []
+        for _, model in ModelRegistry.MODELS.items():
+            if task_types is not None and not any(
+                task.name in task_types for task in model.task_types
+            ):
+                continue
+            local_rank = 0 if model.provider in LOCAL_PROVIDERS else 1
+            entries.append((local_rank, model.provider, model.name))
+
+        entries.sort(key=lambda item: (item[0], item[1], item[2].lower()))
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for _, _, name in entries:
+            if name not in seen:
+                deduped.append(name)
+                seen.add(name)
+        return deduped
+
     def _setup_ui(self) -> None:
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
@@ -147,19 +170,7 @@ class SettingsDialog(QDialog):
 
         self.default_model = QComboBox()
         self.default_model.addItems(
-            [
-                "Auto (Best for Task)",
-                "Claude Opus 4.6",
-                "Claude Sonnet 4.5",
-                "Claude Haiku 4.5",
-                "GPT-4o",
-                "GPT-4o Mini",
-                "o1",
-                "Gemini 2.0 Flash",
-                "Gemini 1.5 Pro",
-                "DeepSeek Chat",
-                "Llama 3.2 (Local)",
-            ]
+            ["Auto (Best for Task)", *self._available_model_names()]
         )
         default_layout.addRow("Default Model:", self.default_model)
 
@@ -171,19 +182,22 @@ class SettingsDialog(QDialog):
 
         self.code_model = QComboBox()
         self.code_model.addItems(
-            ["Auto", "Claude Sonnet 4.5", "GPT-4o", "DeepSeek Chat", "Codestral"]
+            ["Auto", *self._available_model_names({"CODE_GENERATION"})]
         )
         routing_layout.addRow("Coding Tasks:", self.code_model)
 
         self.reasoning_model = QComboBox()
         self.reasoning_model.addItems(
-            ["Auto", "Claude Opus 4.6", "o1", "DeepSeek Reasoner"]
+            [
+                "Auto",
+                *self._available_model_names({"REASONING", "DEEP_REASONING", "MATH"}),
+            ]
         )
         routing_layout.addRow("Reasoning Tasks:", self.reasoning_model)
 
         self.creative_model = QComboBox()
         self.creative_model.addItems(
-            ["Auto", "Claude Opus 4.6", "GPT-4o", "Gemini 1.5 Pro"]
+            ["Auto", *self._available_model_names({"CREATIVE_WRITING"})]
         )
         routing_layout.addRow("Creative Tasks:", self.creative_model)
 

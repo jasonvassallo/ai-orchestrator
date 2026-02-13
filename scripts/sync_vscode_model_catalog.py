@@ -105,9 +105,9 @@ def _update_package_json(catalog: dict[str, dict[str, Any]]) -> None:
 
     selected_model["enum"] = enum_values
     selected_model["enumDescriptions"] = enum_descriptions
-    properties["ai-orchestrator.preferLocal"][
-        "description"
-    ] = "Prefer local models (MLX) for privacy and lower latency"
+    properties["ai-orchestrator.preferLocal"]["description"] = (
+        "Prefer local models (MLX) for privacy and lower latency"
+    )
 
     # Remove stale Ollama-specific setting and ensure MLX runtime settings exist.
     properties.pop("ai-orchestrator.ollamaBaseUrl", None)

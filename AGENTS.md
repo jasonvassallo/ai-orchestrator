@@ -37,7 +37,7 @@ Key components in `src/orchestrator.py`:
 - `LLMRouter` and `ChainedExecutor` enable multi-model routing and sequential chaining
 - `RateLimiter`, `RetryHandler`, and `InputValidator` enforce throttling, retries, and prompt safety
 
-Local providers (`ollama`, `mlx`) are recognized via `local_providers` set in `get_models_for_task()`. `prefer_local=True` filters to these providers and `TaskType.LOCAL_MODEL` gives them a scoring bonus.
+Local providers are MLX-backed (`mlx`) via `LOCAL_PROVIDERS` in `src/orchestrator.py`. `prefer_local=True` filters to local models and `TaskType.LOCAL_MODEL` gives them a scoring bonus.
 
 ## UI Layer
 
@@ -139,7 +139,7 @@ Python 3.10+ is required. Use 4-space indentation and format with Ruff (compatib
 
 ## Testing Guidelines
 
-Tests run with Pytest and pytest-asyncio and are located in `tests/`. Run `pytest` for the full suite, or `pytest --cov=src --cov-report=html` for coverage reports. Type checking and linting are run via `mypy src` and `ruff check src`. Local provider tests accept both "ollama" and "mlx" as valid providers.
+Tests run with Pytest and pytest-asyncio and are located in `tests/`. Run `pytest` for the full suite, or `pytest --cov=src --cov-report=html` for coverage reports. Type checking and linting are run via `mypy src` and `ruff check src`. Local provider tests validate MLX local routing.
 
 ## Adding a New Provider
 

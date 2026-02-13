@@ -218,8 +218,8 @@ Additional scoring factors:
 
 ### Local Providers
 
-Both `ollama` and `mlx` are recognized as local providers:
-- `prefer_local=True` filters to only these providers
+MLX (`mlx`) is the local provider path:
+- `prefer_local=True` filters to local models
 - `TaskType.LOCAL_MODEL` detection gives them a scoring bonus
 - MLX is optimized for Apple Silicon via command-line invocation
 
@@ -287,7 +287,7 @@ All provider calls are async. The orchestrator uses:
 - Tests use mocking; no real API keys needed
 - `pytest-asyncio` with `asyncio_mode = "auto"` for async tests
 - Security compliance tests verify no hardcoded API keys in source
-- Local provider tests accept both "ollama" and "mlx" as valid
+- Local provider tests validate MLX local routing
 
 ## Commit & PR Guidelines
 

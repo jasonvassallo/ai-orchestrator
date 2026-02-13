@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 LOCAL_MODELS = {
     "MLX Qwen3 4B": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
     "MLX Qwen3 Coder 30B": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit",
-    "MLX Qwen3 VL 4B": "mlx-community/Qwen3-VL-4B-Instruct-4bit",
+    "MLX Qwen3 VL 4B (8-bit)": "mlx-community/Qwen3-VL-4B-Instruct-8bit",
     "MLX Qwen 2.5 Coder 14B": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
     "MLX Llama 3.2 11B Vision": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
     "MLX Ministral 14B Reasoning": "mlx-community/Ministral-3-14B-Reasoning-2512-6bit",

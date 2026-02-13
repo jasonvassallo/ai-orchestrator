@@ -165,7 +165,7 @@ python -m src.manage_models --yes
 python -m src.manage_models --yes --no-clean
 ```
 
-It includes MLX Qwen3 4B, MLX Qwen3 Coder 30B, MLX Qwen3 VL 4B, MLX Qwen 2.5 Coder 14B, MLX Llama 3.2 11B Vision, MLX Ministral 14B Reasoning, plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
+It includes MLX Qwen3 4B (4-bit), MLX Qwen3 Coder 30B (4-bit), MLX Qwen3 VL 4B (8-bit), MLX Qwen 2.5 Coder 14B (4-bit), MLX Llama 3.2 11B Vision (4-bit), MLX Ministral 14B Reasoning (6-bit), plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
 
 ## Mac Applications
 
@@ -322,12 +322,12 @@ python setup_app.py py2app
 
 | Model | Provider | Best For | Strengths |
 |-------|----------|----------|-----------|
-| `mlx-llama-vision-11b` | MLX | Apple Silicon, Vision | Vision, documents, charts, writing, 128K context |
-| `mlx-qwen3-4b` | MLX | Apple Silicon, Daily/Coding | Fast, efficient, local, private |
-| `mlx-qwen3-coder-30b` | MLX | Apple Silicon, Large/Complex Coding | Agentic coding, long context, local |
-| `mlx-qwen3-vl-4b` | MLX | Apple Silicon, Vision + Chat | Vision understanding, captioning, local |
-| `mlx-qwen2.5-coder-14b` | MLX | Apple Silicon, Coding | Strong coding, debugging, refactoring, local |
-| `mlx-ministral-14b-reasoning` | MLX | Apple Silicon, Deep Thinking | Reasoning, math, STEM, local |
+| `mlx-llama-vision-11b` | MLX | Apple Silicon, Vision | Vision, documents, charts, writing, 128K context (4-bit) |
+| `mlx-qwen3-4b` | MLX | Apple Silicon, Daily/Coding | Fast, efficient, local, private (4-bit) |
+| `mlx-qwen3-coder-30b` | MLX | Apple Silicon, Large/Complex Coding | Agentic coding, long context, local (4-bit default) |
+| `mlx-qwen3-vl-4b` | MLX | Apple Silicon, Vision + Chat | Vision understanding, captioning, local (8-bit default) |
+| `mlx-qwen2.5-coder-14b` | MLX | Apple Silicon, Coding | Strong coding, debugging, refactoring, local (4-bit) |
+| `mlx-ministral-14b-reasoning` | MLX | Apple Silicon, Deep Thinking | Reasoning, math, STEM, local (6-bit) |
 
 ### Smart Routing Configuration
 
@@ -555,7 +555,7 @@ npm run package
 
 For local MLX models in the extension:
 - set `ai-orchestrator.pythonProjectPath` to the repository root
-- optionally set `ai-orchestrator.pythonExecutable` (defaults to `python3`)
+- optionally set `ai-orchestrator.pythonExecutable` (leave empty to auto-detect `.venv`)
 
 ### Commands
 
@@ -577,6 +577,8 @@ python scripts/sync_vscode_model_catalog.py
 
 A scheduled GitHub Action (`refresh-vscode-model-catalog.yml`) runs weekly and opens a PR when the catalog changes.
 
+CLI/TUI/Menu Bar/GUI already read directly from `ModelRegistry` in `src/orchestrator.py`, so model updates there are immediate once registry entries change.
+
 ### Context Menu
 
 Right-click selected code for:
@@ -589,8 +591,9 @@ Right-click selected code for:
 # Install dev dependencies
 pip install -e ".[dev]"
 
-# Run tests
-pytest
+# Run tests (project mytest wrapper)
+mytest() { pytest -q; }
+mytest
 
 # Run with coverage
 pytest --cov=src --cov-report=html
@@ -598,9 +601,13 @@ pytest --cov=src --cov-report=html
 # Type checking
 mypy src
 
-# Linting
+# Linting + formatting
 ruff check src
 ruff format --check .
+
+# Security scans
+bandit -q -r src scripts
+pip-audit
 ```
 
 ## Project Structure
@@ -609,7 +616,7 @@ ruff format --check .
 ai-orchestrator/
 ├── src/
 │   ├── __init__.py
-│   ├── orchestrator.py    # Main orchestrator logic (25+ models, 11 providers)
+│   ├── orchestrator.py    # Main orchestrator logic (50+ models, 11 providers)
 │   ├── credentials.py     # Secure credential management
 │   ├── storage.py         # Conversation storage (SQLite)
 │   ├── music.py           # Music generation (MIDI + MusicGen audio)

@@ -2152,10 +2152,7 @@ class MLXProvider(BaseProvider):
 
                 text_load_result: Any = await asyncio.to_thread(_load_model)
 
-                if (
-                    isinstance(text_load_result, tuple)
-                    and len(text_load_result) >= 2
-                ):
+                if isinstance(text_load_result, tuple) and len(text_load_result) >= 2:
                     self._model = text_load_result[0]
                     self._tokenizer = text_load_result[1]
                 else:
@@ -3497,7 +3494,7 @@ class ModelRegistry:
         "mlx-qwen3-vl-4b": ModelCapability(
             name="MLX Qwen3 VL 4B",
             provider="mlx",
-            model_id="mlx-community/Qwen3-VL-4B-Instruct-4bit",
+            model_id="mlx-community/Qwen3-VL-4B-Instruct-8bit",
             task_types=(
                 TaskType.MULTIMODAL,
                 TaskType.LOCAL_MODEL,
@@ -3511,6 +3508,7 @@ class ModelRegistry:
                 "vision",
                 "image understanding",
                 "captioning",
+                "8-bit precision",
                 "fast",
                 "local",
                 "private",

@@ -1,6 +1,7 @@
-import sys
 import asyncio
 import logging
+import sys
+
 from src.orchestrator import AIOrchestrator, ModelRegistry
 
 # Configure logging to print to stderr

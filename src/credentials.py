@@ -528,7 +528,6 @@ def configure_credentials_interactive() -> None:
         ("perplexity", "Perplexity (Sonar - Web Search)"),
         ("deepseek", "DeepSeek (Chat, Reasoner)"),
         ("moonshot", "Moonshot (Kimi K2 - Extended Thinking)"),
-        ("ollama", "Ollama (Local models - no API key needed)"),
     ]
 
     provider_ids = [p[0] for p in providers]
@@ -554,6 +553,7 @@ def configure_credentials_interactive() -> None:
 
     print("\n" + "=" * 50)
     print("Configuration complete!")
+    print("Local MLX models do not require API keys.")
     print(
         f"Configured providers: {manager.list_configured_providers(known_providers=provider_ids)}"
     )
