@@ -10,7 +10,7 @@
  * - Audit logging
  * 
  * @author AI Orchestrator Team
- * @version 2.2.0
+ * @version 2.3.0
  */
 
 const vscode = require('vscode');
@@ -277,6 +277,67 @@ class OpenAIProvider {
         return normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3') || normalized.startsWith('o4');
     }
 
+    supportsWebSearch(modelId) {
+        return this.usesResponsesApi(modelId);
+    }
+
+    stringifyContent(content) {
+        if (typeof content === 'string') {
+            return content;
+        }
+        if (Array.isArray(content)) {
+            return content.map((item) => {
+                if (typeof item === 'string') {
+                    return item;
+                }
+                if (item && typeof item === 'object' && item.type === 'text') {
+                    return item.text || '';
+                }
+                return '';
+            }).join('\n');
+        }
+        if (content === null || content === undefined) {
+            return '';
+        }
+        return String(content);
+    }
+
+    shouldUseWebSearch(messages, modelId, options = {}) {
+        if (!this.supportsWebSearch(modelId)) {
+            return false;
+        }
+        if (options.enableWebSearch === false) {
+            return false;
+        }
+        if (options.enableWebSearch === true && options.forceWebSearch === true) {
+            return true;
+        }
+
+        const lastUser = [...messages].reverse().find((msg) => msg.role === 'user');
+        const prompt = this.stringifyContent(lastUser?.content || '').toLowerCase();
+        if (!prompt) {
+            return false;
+        }
+
+        return /\b(current|latest|today|recent|up[- ]to[- ]date|news|search the web|look up|what'?s new)\b/i.test(prompt);
+    }
+
+    isWebSearchToolError(error) {
+        const message = String(error?.message || error || '').toLowerCase();
+        const toolRelated = message.includes('web_search') || message.includes('web search') || message.includes('tool');
+        if (!toolRelated) {
+            return false;
+        }
+        return (
+            message.includes('unsupported') ||
+            message.includes('not supported') ||
+            message.includes('invalid') ||
+            message.includes('unknown') ||
+            message.includes('unrecognized') ||
+            message.includes('does not support')
+        );
+    }
+
     splitSystemMessages(messages) {
         let systemMessage;
         const inputMessages = [];
@@ -319,6 +380,7 @@ class OpenAIProvider {
 
         const maxTokens = options.maxTokens || 4096;
         const useResponsesApi = this.usesResponsesApi(modelId);
+        const useWebSearch = this.shouldUseWebSearch(messages, modelId, options);
         const { systemMessage, inputMessages } = this.splitSystemMessages(messages);
 
         const responsesPayload = {
@@ -384,8 +446,30 @@ class OpenAIProvider {
             req.end();
         });
 
+        const requestResponsesWithWebSearch = async () => {
+            const toolCandidates = ['web_search_preview', 'web_search'];
+            for (const toolType of toolCandidates) {
+                try {
+                    const payload = JSON.stringify({
+                        ...responsesPayload,
+                        tools: [{ type: toolType }],
+                    });
+                    return await makeRequest('/v1/responses', payload);
+                } catch (toolError) {
+                    if (!this.isWebSearchToolError(toolError)) {
+                        throw toolError;
+                    }
+                }
+            }
+
+            // Fall back to non-tool response if this model/tool combo is unsupported.
+            return makeRequest('/v1/responses', JSON.stringify(responsesPayload));
+        };
+
         try {
-            const response = await makeRequest(requestPath, body);
+            const response = useResponsesApi && useWebSearch
+                ? await requestResponsesWithWebSearch()
+                : await makeRequest(requestPath, body);
             if (useResponsesApi) {
                 const content = this.extractResponsesText(response);
                 return {
@@ -415,7 +499,9 @@ class OpenAIProvider {
 
             if (!useResponsesApi && needsResponses) {
                 try {
-                    const response = await makeRequest('/v1/responses', JSON.stringify(responsesPayload));
+                    const response = useWebSearch
+                        ? await requestResponsesWithWebSearch()
+                        : await makeRequest('/v1/responses', JSON.stringify(responsesPayload));
                     const content = this.extractResponsesText(response);
                     return {
                         content,
@@ -431,6 +517,21 @@ class OpenAIProvider {
             }
             throw err;
         }
+    }
+
+    async completeStream(messages, modelId, options = {}, onStreamChunk = null) {
+        const response = await this.complete(messages, modelId, options);
+        if (typeof onStreamChunk === 'function' && typeof response?.content === 'string' && response.content) {
+            const chunks = response.content.match(/[\s\S]{1,120}/g) || [];
+            for (const chunk of chunks) {
+                onStreamChunk(chunk);
+                // Yield to the extension event loop so the webview can paint progressively.
+                // This keeps the behavior responsive even for long answers.
+                // eslint-disable-next-line no-await-in-loop
+                await new Promise((resolve) => setTimeout(resolve, 0));
+            }
+        }
+        return response;
     }
 }
 
@@ -908,10 +1009,39 @@ class AIOrchestrator {
         messages.push({ role: 'user', content: prompt });
 
         // Execute request
-        const response = await provider.complete(messages, model.modelId, {
+        const providerOptions = {
             maxTokens: options.maxTokens || 4096,
             temperature: options.temperature || 0.7,
-        });
+            enableWebSearch: options.enableWebSearch !== false,
+            forceWebSearch: options.forceWebSearch === true,
+        };
+        const onStreamChunk = typeof options.onStreamChunk === 'function'
+            ? options.onStreamChunk
+            : null;
+        let streamed = false;
+        let response;
+        if (onStreamChunk && typeof provider.completeStream === 'function') {
+            response = await provider.completeStream(
+                messages,
+                model.modelId,
+                providerOptions,
+                (chunk) => {
+                    if (!chunk) return;
+                    streamed = true;
+                    onStreamChunk(chunk);
+                }
+            );
+        } else {
+            response = await provider.complete(messages, model.modelId, providerOptions);
+        }
+
+        if (!streamed && onStreamChunk && typeof response?.content === 'string' && response.content) {
+            // Fallback streaming for providers that return only a final response.
+            const chunks = response.content.match(/[\s\S]{1,120}/g) || [];
+            for (const chunk of chunks) {
+                onStreamChunk(chunk);
+            }
+        }
 
         // Update history
         this.conversationHistory.push({ role: 'user', content: prompt });
@@ -951,6 +1081,7 @@ function activate(context) {
             maxTokens: config.get('maxTokens', 4096),
             temperature: config.get('temperature', 0.7),
             systemPrompt: config.get('systemPrompt', ''),
+            enableWebSearch: config.get('enableWebSearch', true),
         };
 
         if (selectedModel && MODELS[selectedModel]) {
@@ -1024,6 +1155,22 @@ function activate(context) {
                 await vscode.commands.executeCommand('ai-orchestrator.chatView.focus');
             } catch {
                 // Older VS Code versions may not expose a focus command; ignore.
+            }
+        }),
+
+        vscode.commands.registerCommand('ai-orchestrator.askSelectionInChat', async () => {
+            const editor = vscode.window.activeTextEditor;
+            if (!editor || editor.selection.isEmpty) {
+                vscode.window.showWarningMessage('Select code or text first.');
+                return;
+            }
+
+            await vscode.commands.executeCommand('ai-orchestrator.openChat');
+            const seeded = await chatViewProvider?.seedSelectionDraft?.(
+                'Analyze this selection and suggest a focused improvement.'
+            );
+            if (!seeded) {
+                vscode.window.showWarningMessage('Could not attach current selection to chat.');
             }
         }),
 
@@ -1157,7 +1304,53 @@ function activate(context) {
         }),
     ];
 
-    context.subscriptions.push(...commands, outputChannel);
+    const inlineActionProvider = {
+        provideCodeActions(_document, range) {
+            if (!range || range.isEmpty) {
+                return [];
+            }
+
+            const askInChat = new vscode.CodeAction(
+                'AI Orchestrator: Ask In Chat',
+                vscode.CodeActionKind.RefactorRewrite
+            );
+            askInChat.command = {
+                command: 'ai-orchestrator.askSelectionInChat',
+                title: 'Ask In Chat',
+            };
+            askInChat.isPreferred = true;
+
+            const explain = new vscode.CodeAction(
+                'AI Orchestrator: Explain Selection',
+                vscode.CodeActionKind.RefactorRewrite
+            );
+            explain.command = {
+                command: 'ai-orchestrator.explainCode',
+                title: 'Explain Selection',
+            };
+
+            const improve = new vscode.CodeAction(
+                'AI Orchestrator: Improve Selection',
+                vscode.CodeActionKind.RefactorRewrite
+            );
+            improve.command = {
+                command: 'ai-orchestrator.improveCode',
+                title: 'Improve Selection',
+            };
+
+            return [askInChat, explain, improve];
+        },
+    };
+
+    const codeActions = vscode.languages.registerCodeActionsProvider(
+        { scheme: 'file' },
+        inlineActionProvider,
+        {
+            providedCodeActionKinds: [vscode.CodeActionKind.RefactorRewrite],
+        }
+    );
+
+    context.subscriptions.push(...commands, codeActions, outputChannel);
 }
 
 function deactivate() {
