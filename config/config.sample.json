@@ -8,6 +8,7 @@
     "costOptimize": false,
     "enableLLMRouting": true,
     "routerAllTasks": true,
+    "enableWebSearch": true,
     "routingModel": "gemini-3-flash-preview",
     "preferSubscriptionProviders": [
       "vertex-ai"
