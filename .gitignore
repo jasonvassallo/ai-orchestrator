@@ -141,6 +141,10 @@ yarn-error.log*
 *.vsix
 out/
 
+# Security scan reports
+bandit-report*.json
+security_best_practices_report*.md
+
 # ======================================
 # IDE and Editor
 # ======================================

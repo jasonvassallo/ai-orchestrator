@@ -10,7 +10,7 @@
  * - Audit logging
  * 
  * @author AI Orchestrator Team
- * @version 2.1.3
+ * @version 2.2.0
  */
 
 const vscode = require('vscode');
@@ -19,6 +19,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const MODELS = require('../model-catalog.json');
+const { ChatViewProvider } = require('./chatView');
 
 /**
  * Secure credential manager using VS Code's built-in SecretStorage
@@ -933,6 +934,7 @@ class AIOrchestrator {
 // Extension activation
 let orchestrator = null;
 let outputChannel = null;
+let chatViewProvider = null;
 
 function activate(context) {
     console.log('AI Orchestrator extension activated');
@@ -964,6 +966,14 @@ function activate(context) {
 
         return { ...options, ...overrides };
     };
+
+    // Register chat sidebar view.
+    chatViewProvider = new ChatViewProvider(context, orchestrator, getConfiguredQueryOptions);
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(ChatViewProvider.viewType, chatViewProvider, {
+            webviewOptions: { retainContextWhenHidden: true },
+        })
+    );
 
     // Register commands
     const commands = [
@@ -1004,6 +1014,16 @@ function activate(context) {
             } catch (error) {
                 vscode.window.showErrorMessage(`AI Orchestrator Error: ${error.message}`);
                 outputChannel.appendLine(`[Error] ${error.message}`);
+            }
+        }),
+
+        vscode.commands.registerCommand('ai-orchestrator.openChat', async () => {
+            // Reveal the AI Orchestrator view container + chat view.
+            await vscode.commands.executeCommand('workbench.view.extension.ai-orchestrator');
+            try {
+                await vscode.commands.executeCommand('ai-orchestrator.chatView.focus');
+            } catch {
+                // Older VS Code versions may not expose a focus command; ignore.
             }
         }),
 
@@ -1069,6 +1089,7 @@ function activate(context) {
 
         vscode.commands.registerCommand('ai-orchestrator.clearHistory', () => {
             orchestrator.clearHistory();
+            chatViewProvider?.refresh?.();
             vscode.window.showInformationMessage('Conversation history cleared');
         }),
 

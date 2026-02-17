@@ -2,7 +2,7 @@
   "name": "ai-orchestrator",
   "displayName": "AI Orchestrator",
   "description": "Intelligent multi-model AI assistant that automatically routes queries to the best AI model",
-  "version": "2.1.3",
+  "version": "2.2.0",
   "publisher": "ai-orchestrator",
   "license": "MIT",
   "engines": {
@@ -29,7 +29,9 @@
   },
   "icon": "images/icon.png",
   "activationEvents": [
+    "onView:ai-orchestrator.chatView",
     "onCommand:ai-orchestrator.query",
+    "onCommand:ai-orchestrator.openChat",
     "onCommand:ai-orchestrator.configureCredentials",
     "onCommand:ai-orchestrator.selectModel",
     "onCommand:ai-orchestrator.clearHistory",
@@ -42,6 +44,11 @@
       {
         "command": "ai-orchestrator.query",
         "title": "AI Orchestrator: Ask AI",
+        "category": "AI Orchestrator"
+      },
+      {
+        "command": "ai-orchestrator.openChat",
+        "title": "AI Orchestrator: Open Chat",
         "category": "AI Orchestrator"
       },
       {
@@ -81,6 +88,23 @@
           "when": "editorHasSelection",
           "command": "ai-orchestrator.improveCode",
           "group": "ai-orchestrator@2"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ai-orchestrator",
+          "title": "AI Orchestrator",
+          "icon": "images/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "ai-orchestrator": [
+        {
+          "id": "ai-orchestrator.chatView",
+          "name": "Chat"
         }
       ]
     },
