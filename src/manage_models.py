@@ -19,7 +19,7 @@ Usage:
 import argparse
 import logging
 import os
-import subprocess
+import subprocess  # nosec B404
 import sys
 import time
 from pathlib import Path
@@ -81,7 +81,7 @@ def check_huggingface_cli() -> bool:
 
     try:
         # Check if it actually runs
-        subprocess.run([cli_path, "--help"], capture_output=True, check=True)  # noqa: S603
+        subprocess.run([cli_path, "--help"], capture_output=True, check=True)  # noqa: S603  # nosec B603
         return True
     except (subprocess.CalledProcessError, Exception):
         return False
@@ -108,7 +108,7 @@ def download_with_retry(repo_id: str) -> bool:
 
     for attempt in range(1, DOWNLOAD_RETRIES + 1):
         try:
-            subprocess.run([cli_path, "download", repo_id], check=True)  # noqa: S603
+            subprocess.run([cli_path, "download", repo_id], check=True)  # noqa: S603  # nosec B603
             return True
         except subprocess.CalledProcessError as e:
             print(f"   ❌ Download failed (attempt {attempt}/{DOWNLOAD_RETRIES}): {e}")
@@ -158,7 +158,7 @@ def get_cache_command() -> str | None:
             capture_output=True,
             text=True,
             check=True,
-        )
+        )  # nosec B603
     except Exception:
         return None
 
@@ -293,7 +293,7 @@ def clean_cache(auto_yes: bool) -> None:
             command = [get_cli_path(), "cache", cache_command]
             if cache_command == "prune" and auto_yes:
                 command.append("--yes")
-            subprocess.run(command, check=False, env=env)  # noqa: S603
+            subprocess.run(command, check=False, env=env)  # noqa: S603  # nosec B603
 
         except KeyboardInterrupt:
             print("\nCancelled.")

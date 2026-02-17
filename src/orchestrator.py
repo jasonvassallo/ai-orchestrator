@@ -23,6 +23,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from abc import ABC, abstractmethod
@@ -30,6 +31,7 @@ from collections import deque
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field
 from enum import Enum, auto
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -200,6 +202,7 @@ class StatusStage(Enum):
     ROUTING = auto()
     ROUTING_LLM = auto()
     SELECTING = auto()
+    DOWNLOADING = auto()
     CHAINING = auto()
     GENERATING = auto()
     THINKING = auto()
@@ -711,6 +714,23 @@ class OpenAIProvider(BaseProvider):
     """OpenAI API provider"""
 
     @staticmethod
+    def _sanitize_messages_for_openai(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """
+        OpenAI APIs reject unknown keys inside message objects (e.g. timestamp).
+        Keep only fields OpenAI expects: role + content.
+        """
+        sanitized: list[dict[str, Any]] = []
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content")
+            if not isinstance(role, str):
+                continue
+            sanitized.append({"role": role, "content": content})
+        return sanitized
+
+    @staticmethod
     def _uses_max_completion_tokens(model: str) -> bool:
         normalized = model.strip().lower()
         return normalized.startswith(("o1", "o3", "o4", "gpt-5"))
@@ -764,7 +784,16 @@ class OpenAIProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
         try:
@@ -774,8 +803,11 @@ class OpenAIProvider(BaseProvider):
             )
 
             max_tokens = kwargs.get("max_tokens", 4096)
+            sanitized_messages = self._sanitize_messages_for_openai(messages)
             if self._uses_responses_api(model):
-                system_message, input_messages = self._split_system_messages(messages)
+                system_message, input_messages = self._split_system_messages(
+                    sanitized_messages
+                )
                 payload: dict[str, Any] = {
                     "model": model,
                     "input": input_messages,
@@ -806,7 +838,7 @@ class OpenAIProvider(BaseProvider):
 
             payload = {
                 "model": model,
-                "messages": messages,
+                "messages": sanitized_messages,
             }
             if self._uses_max_completion_tokens(model):
                 payload["max_completion_tokens"] = max_tokens
@@ -942,7 +974,16 @@ class AnthropicProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1023,7 +1064,16 @@ class GoogleProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1193,7 +1243,8 @@ class VertexAIProvider(BaseProvider):
         """Get OAuth2 access token for API calls"""
         from google.auth.transport.requests import Request
 
-        assert self._credentials is not None
+        if self._credentials is None:
+            raise RuntimeError("Vertex AI credentials are not initialized")
         if not self._credentials.valid:
             refresh_func: Callable[[Request], Any] = self._credentials.refresh
             await asyncio.to_thread(refresh_func, Request())
@@ -1221,7 +1272,16 @@ class VertexAIProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1371,7 +1431,16 @@ class OllamaProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1446,7 +1515,16 @@ class MistralProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1527,7 +1605,16 @@ class GroqProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1608,7 +1695,16 @@ class XAIProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1725,7 +1821,16 @@ class PerplexityProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1816,7 +1921,16 @@ class DeepSeekProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1901,7 +2015,16 @@ class MoonshotProvider(BaseProvider):
     ) -> APIResponse:
         if not self._client:
             await self.initialize()
-        assert self._client is not None
+        if self._client is None:
+            return APIResponse(
+                content="",
+                model=model,
+                provider=self.provider_name,
+                usage={},
+                latency_ms=0,
+                success=False,
+                error=f"{self.provider_name} provider failed to initialize.",
+            )
 
         start_time = time.time()
 
@@ -1975,10 +2098,14 @@ class MLXProvider(BaseProvider):
         rate_limiter: RateLimiter,
         model_path: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit",
         is_vision_model: bool = False,
+        status_callback: StatusCallback | None = None,
+        status_model_name: str | None = None,
     ):
         super().__init__(rate_limiter)
         self.model_path = model_path
         self._is_vision_model = is_vision_model
+        self._status_callback = status_callback
+        self._status_model_name = status_model_name
         self._available = False
         self._model: Any = None
         self._tokenizer: Any = None  # For text models
@@ -1990,13 +2117,194 @@ class MLXProvider(BaseProvider):
     def provider_name(self) -> str:
         return "mlx"
 
+    @staticmethod
+    def _patch_transformers_video_processor_loading() -> None:
+        """
+        Work around transformers video processor lookup issues on environments
+        without torch/torchvision (common in MLX-only setups).
+        """
+        try:
+            import transformers.models.auto.video_processing_auto as video_auto
+            from transformers.processing_utils import ProcessorMixin
+            from transformers.video_processing_utils import BaseVideoProcessor
+        except Exception:
+            return
+
+        if getattr(video_auto, "_ai_orchestrator_video_patch_applied", False):
+            return
+
+        original_video_class_lookup = video_auto.video_processor_class_from_name
+        original_check_argument = ProcessorMixin.check_argument_for_proper_class
+
+        def _safe_video_processor_class_from_name(class_name: str) -> Any:
+            try:
+                klass = original_video_class_lookup(class_name)
+            except TypeError as exc:
+                if "NoneType" not in str(exc):
+                    raise
+                klass = None
+
+            if klass is None:
+                return BaseVideoProcessor
+
+            module_name = getattr(klass, "__module__", "")
+            if isinstance(module_name, str) and module_name.startswith(
+                "transformers.utils.dummy_"
+            ):
+                return BaseVideoProcessor
+
+            return klass
+
+        def _safe_check_argument_for_proper_class(
+            self: Any, argument_name: str, argument: Any
+        ) -> Any:
+            try:
+                return original_check_argument(self, argument_name, argument)
+            except TypeError:
+                if (
+                    argument_name == "video_processor"
+                    and type(argument).__name__ == "BaseVideoProcessor"
+                ):
+                    return type(argument)
+                raise
+
+        video_auto.video_processor_class_from_name = _safe_video_processor_class_from_name
+        cast(Any, ProcessorMixin).check_argument_for_proper_class = (
+            _safe_check_argument_for_proper_class
+        )
+        cast(Any, video_auto)._ai_orchestrator_video_patch_applied = True
+        logger.info(
+            "Applied transformers video processor compatibility patch for MLX vision loading."
+        )
+
+    def set_status_callback(
+        self,
+        status_callback: StatusCallback | None,
+        status_model_name: str | None = None,
+    ) -> None:
+        """Update status callback and model label used for progress updates."""
+        self._status_callback = status_callback
+        if status_model_name:
+            self._status_model_name = status_model_name
+
+    async def _emit_download_status(
+        self,
+        message: str,
+        progress: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        if self._status_callback is None:
+            return
+
+        clamped_progress = (
+            None
+            if progress is None
+            else max(0.0, min(1.0, float(progress)))
+        )
+        status = AgentStatus(
+            stage=StatusStage.DOWNLOADING,
+            message=message,
+            progress=clamped_progress,
+            model=self._status_model_name,
+            metadata=metadata or {},
+        )
+        result = self._status_callback(status)
+        if asyncio.iscoroutine(result):
+            await result
+
+    async def _download_snapshot_with_progress(
+        self,
+        repo_id: str,
+        snapshot_download: Callable[..., str | list[Any]],
+        hf_hub_download: Callable[..., str | Any],
+    ) -> str:
+        """Download a HF snapshot with file-level progress for UI updates."""
+        dry_run_result = await asyncio.to_thread(
+            snapshot_download,
+            repo_id=repo_id,
+            dry_run=True,
+        )
+
+        dry_run_files: list[Any] = (
+            dry_run_result if isinstance(dry_run_result, list) else []
+        )
+        files_to_download = [
+            info
+            for info in dry_run_files
+            if getattr(info, "will_download", False)
+        ]
+        total_files = len(files_to_download)
+        total_bytes = sum(
+            max(int(getattr(info, "file_size", 0) or 0), 0)
+            for info in files_to_download
+        )
+
+        if total_files > 0:
+            await self._emit_download_status(
+                f"Downloading model files (0/{total_files})",
+                progress=0.0,
+                metadata={
+                    "repo_id": repo_id,
+                    "files_downloaded": 0,
+                    "files_total": total_files,
+                    "bytes_downloaded": 0,
+                    "bytes_total": total_bytes,
+                },
+            )
+
+        bytes_downloaded = 0
+        for index, file_info in enumerate(files_to_download, start=1):
+            filename_raw = str(getattr(file_info, "filename", ""))
+            if not filename_raw:
+                continue
+
+            file_path = PurePosixPath(filename_raw)
+            subfolder = (
+                None if str(file_path.parent) == "." else str(file_path.parent)
+            )
+            revision = getattr(file_info, "commit_hash", None)
+            if not isinstance(revision, str) or not revision:
+                revision = None
+
+            await asyncio.to_thread(
+                hf_hub_download,
+                repo_id=repo_id,
+                filename=file_path.name,
+                subfolder=subfolder,
+                revision=revision,
+            )
+
+            file_size = max(int(getattr(file_info, "file_size", 0) or 0), 0)
+            bytes_downloaded += file_size
+            await self._emit_download_status(
+                f"Downloading model files ({index}/{total_files})",
+                progress=(index / total_files) if total_files else 1.0,
+                metadata={
+                    "repo_id": repo_id,
+                    "files_downloaded": index,
+                    "files_total": total_files,
+                    "bytes_downloaded": bytes_downloaded,
+                    "bytes_total": total_bytes,
+                    "current_file": filename_raw,
+                },
+            )
+
+        snapshot_dir = await asyncio.to_thread(
+            snapshot_download,
+            repo_id=repo_id,
+            local_files_only=True,
+        )
+        if isinstance(snapshot_dir, list):
+            raise RuntimeError("Failed to resolve local snapshot directory")
+        return snapshot_dir
+
     async def initialize(self) -> bool:
         """Initialize MLX model and tokenizer/processor"""
         try:
-            import os
-            from pathlib import Path
-
             import mlx.core as mx
+            from huggingface_hub import (
+                hf_hub_download as hf_hub_download_impl,
+            )
             from huggingface_hub import (
                 snapshot_download as hf_snapshot_download,
             )
@@ -2004,7 +2312,8 @@ class MLXProvider(BaseProvider):
                 try_to_load_from_cache,
             )
 
-            snapshot_download: Callable[..., str] = hf_snapshot_download
+            snapshot_download: Callable[..., str | list[Any]] = hf_snapshot_download
+            hf_hub_download = hf_hub_download_impl
 
             def _find_local_snapshot_dir(repo_id: str) -> str | None:
                 """Search common HF cache roots for a snapshot dir with safetensors."""
@@ -2055,6 +2364,10 @@ class MLXProvider(BaseProvider):
                         local_files_only=True,
                         allow_patterns=["*.safetensors", "*.json", "tokenizer*"],
                     )
+                    if isinstance(snap_dir, list):
+                        raise RuntimeError(
+                            "Unexpected dry-run metadata from local snapshot resolution"
+                        )
                     shards = list(Path(snap_dir).glob("*.safetensors"))
                     if shards:
                         logger.info(
@@ -2094,6 +2407,28 @@ class MLXProvider(BaseProvider):
                         )
                         os.environ["HF_HUB_OFFLINE"] = "0"
 
+            # For first-time use, proactively download the full snapshot so MLX loaders
+            # receive a concrete local directory (avoids partial/None config failures).
+            model_path_obj = Path(self.model_path)
+            if not model_path_obj.exists() and os.environ.get("HF_HUB_OFFLINE") != "1":
+                repo_id = self.model_path
+                await self._emit_download_status(
+                    "Preparing local model download...",
+                    progress=0.0,
+                    metadata={"repo_id": repo_id},
+                )
+                self.model_path = await self._download_snapshot_with_progress(
+                    repo_id=repo_id,
+                    snapshot_download=snapshot_download,
+                    hf_hub_download=hf_hub_download,
+                )
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                await self._emit_download_status(
+                    "Model download complete. Loading model...",
+                    progress=1.0,
+                    metadata={"repo_id": repo_id, "model_path": self.model_path},
+                )
+
             model_path_obj = Path(self.model_path)
             if (
                 model_path_obj.exists()
@@ -2114,6 +2449,7 @@ class MLXProvider(BaseProvider):
 
             # Use different loading strategy based on model type
             if self._is_vision_model:
+                self._patch_transformers_video_processor_loading()
                 # Load vision model with mlx_vlm
                 from mlx_vlm import load as vlm_load
                 from mlx_vlm.utils import load_config
@@ -2274,10 +2610,21 @@ class MLXProvider(BaseProvider):
                     prompt = "\n".join(text_parts).strip() or "Hello."
 
                     def _generate_vision_text_only() -> tuple[str, int, int]:
+                        formatted_prompt = prompt
+                        try:
+                            formatted_prompt = apply_chat_template_func(
+                                self._processor,
+                                self._config,
+                                prompt,
+                                num_images=0,
+                            )
+                        except Exception:
+                            # Some processors/configs may not support template formatting; use raw text.
+                            formatted_prompt = prompt
                         text_result = vlm_generate_func(
                             self._model,
                             self._processor,
-                            prompt,
+                            formatted_prompt,
                             [],
                             max_tokens=kwargs.get("max_tokens", 2048),
                             verbose=False,
@@ -2334,6 +2681,24 @@ class MLXProvider(BaseProvider):
                         vision_input_tokens,
                         vision_output_tokens,
                     ) = await asyncio.to_thread(_generate_vision)
+
+                response_text = (response_text or "").strip()
+                if not response_text:
+                    return APIResponse(
+                        content="",
+                        model=model,
+                        provider=self.provider_name,
+                        usage={
+                            "input_tokens": vision_input_tokens,
+                            "output_tokens": vision_output_tokens,
+                        },
+                        latency_ms=(time.time() - start_time) * 1000,
+                        success=False,
+                        error=(
+                            "MLX vision model returned an empty response. "
+                            "Try again or increase max_tokens."
+                        ),
+                    )
 
             else:
                 # Text model generation using mlx_lm
@@ -4658,8 +5023,17 @@ class AIOrchestrator:
 
         return cast(dict[str, Any], provider_config)
 
-    async def _get_provider(self, provider_name: str) -> BaseProvider | None:
+    async def _get_provider(
+        self,
+        provider_name: str,
+        status_callback: StatusCallback | None = None,
+        status_model_name: str | None = None,
+    ) -> BaseProvider | None:
         """Get or initialize a provider"""
+        existing_provider = self.providers.get(provider_name)
+        if isinstance(existing_provider, MLXProvider):
+            existing_provider.set_status_callback(status_callback, status_model_name)
+
         if provider_name not in self.providers:
             provider: BaseProvider | None = None
             if provider_name == "openai":
@@ -4698,11 +5072,17 @@ class AIOrchestrator:
                         self.rate_limiter,
                         model_path=model_def.model_id,
                         is_vision_model=model_def.supports_vision,
+                        status_callback=status_callback,
+                        status_model_name=status_model_name or model_def.name,
                     )
                 else:
                     logger.error(f"Unknown MLX provider/model: {provider_name}")
             elif provider_name == "mlx":
-                provider = MLXProvider(self.rate_limiter)
+                provider = MLXProvider(
+                    self.rate_limiter,
+                    status_callback=status_callback,
+                    status_model_name=status_model_name,
+                )
             else:
                 logger.error(f"Unknown provider: {provider_name}")
                 return None
@@ -5625,7 +6005,11 @@ class AIOrchestrator:
             if reg_key and reg_key.startswith("mlx-"):
                 provider_key = reg_key
 
-        provider = await self._get_provider(provider_key)
+        provider = await self._get_provider(
+            provider_key,
+            status_callback=status_callback,
+            status_model_name=model.name,
+        )
         if not provider:
             return APIResponse(
                 content="",

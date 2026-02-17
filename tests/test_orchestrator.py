@@ -390,7 +390,7 @@ class TestAIOrchestrator:
         orchestrator = AIOrchestrator(verbose=False)
         provider = FakeVertexProvider(orchestrator.rate_limiter)
 
-        async def fake_get_provider(_name):
+        async def fake_get_provider(_name, *_args, **_kwargs):
             return provider
 
         async def fast_sleep(_delay):

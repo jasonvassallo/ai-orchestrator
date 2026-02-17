@@ -10,7 +10,7 @@
  * - Audit logging
  * 
  * @author AI Orchestrator Team
- * @version 2.1.2
+ * @version 2.1.3
  */
 
 const vscode = require('vscode');
@@ -266,29 +266,95 @@ class OpenAIProvider {
         this.name = 'openai';
     }
 
+    usesResponsesApi(modelId) {
+        const normalized = (modelId || '').trim().toLowerCase();
+        return normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3') || normalized.startsWith('o4');
+    }
+
+    omitTemperature(modelId) {
+        const normalized = (modelId || '').trim().toLowerCase();
+        return normalized.startsWith('gpt-5') || normalized.startsWith('o1') || normalized.startsWith('o3') || normalized.startsWith('o4');
+    }
+
+    splitSystemMessages(messages) {
+        let systemMessage;
+        const inputMessages = [];
+        for (const msg of messages) {
+            if (msg.role === 'system' && systemMessage === undefined) {
+                systemMessage = msg.content;
+                continue;
+            }
+            if (msg.role === 'system') {
+                continue;
+            }
+            inputMessages.push(msg);
+        }
+        return { systemMessage, inputMessages };
+    }
+
+    extractResponsesText(response) {
+        if (typeof response.output_text === 'string' && response.output_text.trim()) {
+            return response.output_text;
+        }
+
+        const output = Array.isArray(response.output) ? response.output : [];
+        const textParts = [];
+        for (const item of output) {
+            const content = Array.isArray(item.content) ? item.content : [];
+            for (const block of content) {
+                if (typeof block.text === 'string' && block.text) {
+                    textParts.push(block.text);
+                }
+            }
+        }
+        return textParts.join('\n').trim();
+    }
+
     async complete(messages, modelId, options = {}) {
         const apiKey = await this.credentialManager.getApiKey('openai');
         if (!apiKey) {
             throw new Error('OpenAI API key not configured. Run "AI Orchestrator: Configure Credentials"');
         }
 
-        const body = JSON.stringify({
+        const maxTokens = options.maxTokens || 4096;
+        const useResponsesApi = this.usesResponsesApi(modelId);
+        const { systemMessage, inputMessages } = this.splitSystemMessages(messages);
+
+        const responsesPayload = {
+            model: modelId,
+            input: inputMessages,
+            max_output_tokens: maxTokens,
+            ...(systemMessage ? { instructions: systemMessage } : {}),
+            ...(this.omitTemperature(modelId) ? {} : { temperature: options.temperature || 0.7 }),
+        };
+
+        const chatPayload = {
             model: modelId,
             messages: messages,
-            max_tokens: options.maxTokens || 4096,
+            max_tokens: maxTokens,
             temperature: options.temperature || 0.7,
-        });
+        };
 
-        return new Promise((resolve, reject) => {
+        const requestPath = useResponsesApi ? '/v1/responses' : '/v1/chat/completions';
+        const bodyPayload = useResponsesApi
+            ? {
+                ...responsesPayload,
+            }
+            : {
+                ...chatPayload,
+            };
+        const body = JSON.stringify(bodyPayload);
+
+        const makeRequest = (path, requestBody) => new Promise((resolve, reject) => {
             const req = https.request({
                 hostname: 'api.openai.com',
                 port: 443,
-                path: '/v1/chat/completions',
+                path,
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${apiKey}`,
-                    'Content-Length': Buffer.byteLength(body),
+                    'Content-Length': Buffer.byteLength(requestBody),
                 },
                 timeout: 120000,
             }, (res) => {
@@ -298,15 +364,9 @@ class OpenAIProvider {
                     try {
                         const response = JSON.parse(data);
                         if (response.error) {
-                            reject(new Error(response.error.message));
+                            reject(new Error(response.error.message || 'OpenAI API error'));
                         } else {
-                            resolve({
-                                content: response.choices[0].message.content,
-                                usage: {
-                                    inputTokens: response.usage.prompt_tokens,
-                                    outputTokens: response.usage.completion_tokens,
-                                },
-                            });
+                            resolve(response);
                         }
                     } catch (e) {
                         reject(new Error(`Failed to parse response: ${e.message}`));
@@ -319,9 +379,57 @@ class OpenAIProvider {
                 req.destroy();
                 reject(new Error('Request timeout'));
             });
-            req.write(body);
+            req.write(requestBody);
             req.end();
         });
+
+        try {
+            const response = await makeRequest(requestPath, body);
+            if (useResponsesApi) {
+                const content = this.extractResponsesText(response);
+                return {
+                    content,
+                    usage: {
+                        inputTokens: response.usage?.input_tokens || 0,
+                        outputTokens: response.usage?.output_tokens || 0,
+                    },
+                };
+            }
+
+            return {
+                content: response.choices[0].message.content,
+                usage: {
+                    inputTokens: response.usage.prompt_tokens,
+                    outputTokens: response.usage.completion_tokens,
+                },
+            };
+        } catch (err) {
+            const msg = String(err?.message || err || '');
+            const needsResponses =
+                msg.includes('only supported in v1/responses') ||
+                msg.includes('supported in v1/responses') ||
+                // Some models return legacy guidance when called via chat/completions.
+                msg.includes('not a chat model') ||
+                msg.includes('v1/chat/completions');
+
+            if (!useResponsesApi && needsResponses) {
+                try {
+                    const response = await makeRequest('/v1/responses', JSON.stringify(responsesPayload));
+                    const content = this.extractResponsesText(response);
+                    return {
+                        content,
+                        usage: {
+                            inputTokens: response.usage?.input_tokens || 0,
+                            outputTokens: response.usage?.output_tokens || 0,
+                        },
+                    };
+                } catch (fallbackErr) {
+                    // Keep the original error if the fallback also fails.
+                    throw err;
+                }
+            }
+            throw err;
+        }
     }
 }
 
