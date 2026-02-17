@@ -141,7 +141,7 @@ yarn-error.log*
 *.vsix
 out/
 
-# Security scan outputs (local artifacts)
+# Security scan reports (local artifacts)
 bandit-report*.json
 security_best_practices_report*.md
 

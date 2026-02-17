@@ -746,6 +746,31 @@ class OpenAIProvider(BaseProvider):
         return normalized.startswith(("o1", "o3", "o4", "gpt-5"))
 
     @staticmethod
+    def _supports_web_search(model: str) -> bool:
+        # OpenAI web search is wired through the Responses API path.
+        return OpenAIProvider._uses_responses_api(model)
+
+    @staticmethod
+    def _is_web_search_tool_error(message: str) -> bool:
+        lowered = message.lower()
+        tool_related = any(
+            marker in lowered for marker in ("web_search", "web search", "tool")
+        )
+        if not tool_related:
+            return False
+        return any(
+            marker in lowered
+            for marker in (
+                "unsupported",
+                "not supported",
+                "invalid",
+                "unknown",
+                "unrecognized",
+                "does not support",
+            )
+        )
+
+    @staticmethod
     def _split_system_messages(
         messages: list[dict[str, Any]],
     ) -> tuple[str | None, list[dict[str, Any]]]:
@@ -804,6 +829,7 @@ class OpenAIProvider(BaseProvider):
 
             max_tokens = kwargs.get("max_tokens", 4096)
             sanitized_messages = self._sanitize_messages_for_openai(messages)
+            use_web_search = bool(kwargs.get("web_search", False))
             if self._uses_responses_api(model):
                 system_message, input_messages = self._split_system_messages(
                     sanitized_messages
@@ -818,7 +844,36 @@ class OpenAIProvider(BaseProvider):
                 if not self._omit_temperature(model):
                     payload["temperature"] = kwargs.get("temperature", 0.7)
 
-                response = await self._client.responses.create(**payload)
+                if use_web_search and self._supports_web_search(model):
+                    tool_candidates = ("web_search_preview", "web_search")
+                    response = None
+                    for tool_type in tool_candidates:
+                        try:
+                            tool_payload = dict(payload)
+                            tool_payload["tools"] = [{"type": tool_type}]
+                            response = await self._client.responses.create(
+                                **tool_payload
+                            )
+                            break
+                        except Exception as tool_error:
+                            if not self._is_web_search_tool_error(str(tool_error)):
+                                raise
+                            logger.debug(
+                                "OpenAI web search tool '%s' rejected for model '%s': %s",
+                                tool_type,
+                                model,
+                                tool_error,
+                            )
+
+                    if response is None:
+                        logger.info(
+                            "OpenAI web search tools unavailable for model '%s'; retrying without web search.",
+                            model,
+                        )
+                        response = await self._client.responses.create(**payload)
+                else:
+                    response = await self._client.responses.create(**payload)
+
                 latency = (time.time() - start_time) * 1000
                 usage = {}
                 if response.usage:
@@ -3395,6 +3450,7 @@ class ModelRegistry:
             cost_per_1k_input=0.015,
             cost_per_1k_output=0.06,
             strengths=("deep reasoning", "math", "complex problems"),
+            supports_web_search=True,
             max_output_tokens=100000,
         ),
         "o1-mini": ModelCapability(
@@ -3406,6 +3462,7 @@ class ModelRegistry:
             cost_per_1k_input=0.003,
             cost_per_1k_output=0.012,
             strengths=("reasoning", "coding", "cost-effective"),
+            supports_web_search=True,
         ),
         # Anthropic Models
         "claude-opus-4.6": ModelCapability(
@@ -3973,6 +4030,7 @@ class ModelRegistry:
             cost_per_1k_input=0.008,
             cost_per_1k_output=0.032,
             strengths=("general purpose", "multimodal", "coding", "reasoning"),
+            supports_web_search=True,
             supports_vision=True,
             supports_functions=True,
             latency_class="standard",
@@ -3993,6 +4051,7 @@ class ModelRegistry:
             cost_per_1k_input=0.012,
             cost_per_1k_output=0.048,
             strengths=("extended thinking", "reasoning traces", "math", "code"),
+            supports_web_search=True,
             supports_extended_thinking=True,
             reasoning_token_limit=100000,
             latency_class="slow",
@@ -4015,6 +4074,7 @@ class ModelRegistry:
             cost_per_1k_input=0.008,
             cost_per_1k_output=0.032,
             strengths=("most capable GPT", "multimodal", "coding", "reasoning"),
+            supports_web_search=True,
             supports_vision=True,
             supports_functions=True,
             latency_class="standard",
@@ -4036,6 +4096,7 @@ class ModelRegistry:
             cost_per_1k_input=0.008,
             cost_per_1k_output=0.032,
             strengths=("most capable GPT", "multimodal", "coding", "reasoning"),
+            supports_web_search=True,
             supports_vision=True,
             supports_functions=True,
             latency_class="standard",
@@ -4057,6 +4118,7 @@ class ModelRegistry:
             cost_per_1k_input=0.010,
             cost_per_1k_output=0.040,
             strengths=("frontier reasoning", "math", "complex problems", "research"),
+            supports_web_search=True,
             max_output_tokens=100000,
             supports_extended_thinking=True,
             latency_class="slow",
@@ -4077,6 +4139,7 @@ class ModelRegistry:
             cost_per_1k_input=0.060,
             cost_per_1k_output=0.240,
             strengths=("ultimate reasoning", "scientific research", "hardest problems"),
+            supports_web_search=True,
             max_output_tokens=100000,
             supports_extended_thinking=True,
             latency_class="slow",
@@ -4097,6 +4160,7 @@ class ModelRegistry:
             cost_per_1k_input=0.0015,
             cost_per_1k_output=0.006,
             strengths=("efficient reasoning", "coding", "cost-effective"),
+            supports_web_search=True,
             latency_class="standard",
             knowledge_cutoff="2025-10",
             best_for=("reasoning tasks", "coding", "moderate complexity"),
@@ -4826,6 +4890,7 @@ class AIOrchestrator:
         router_all_tasks: bool | None = None,
         routing_model: str | None = None,
         incognito: bool = False,
+        enable_web_search: bool | None = None,
     ) -> None:
         self.verbose = verbose
         self.incognito = incognito
@@ -4851,6 +4916,12 @@ class AIOrchestrator:
         )
         self.router_all_tasks = self._resolve_bool_config(
             router_all_tasks, defaults, "routerAllTasks"
+        )
+        self.enable_web_search = self._resolve_bool_config(
+            enable_web_search,
+            defaults,
+            "enableWebSearch",
+            default=True,
         )
         self.routing_model = self._resolve_str_config(
             routing_model, defaults, "routingModel", "gemini-3-flash-preview"
@@ -4878,7 +4949,10 @@ class AIOrchestrator:
 
     @staticmethod
     def _resolve_bool_config(
-        value: bool | None, defaults: dict[str, Any], key: str
+        value: bool | None,
+        defaults: dict[str, Any],
+        key: str,
+        default: bool = False,
     ) -> bool:
         if value is not None:
             return value
@@ -4887,7 +4961,7 @@ class AIOrchestrator:
         if isinstance(config_value, bool):
             return config_value
 
-        return False
+        return default
 
     @staticmethod
     def _resolve_local_provider_preference(
@@ -5458,6 +5532,16 @@ class AIOrchestrator:
         return len(prompt_trimmed) <= 120
 
     @staticmethod
+    def _prompt_requests_current_info(prompt: str) -> bool:
+        return bool(
+            re.search(
+                r"\b(current|latest|today|recent|up[- ]to[- ]date|news|search the web|look up|what'?s new)\b",
+                prompt,
+                re.IGNORECASE,
+            )
+        )
+
+    @staticmethod
     def _first_available_model_key(
         keys: tuple[str, ...],
         allowed_keys: set[str] | None = None,
@@ -5748,6 +5832,7 @@ class AIOrchestrator:
         max_tokens: int = 4096,
         temperature: float = 0.7,
         status_callback: StatusCallback | None = None,
+        enable_web_search: bool | None = None,
     ) -> APIResponse:
         """
         Send a query to the AI orchestrator.
@@ -5758,6 +5843,7 @@ class AIOrchestrator:
             model_override: Force a specific model
             max_tokens: Maximum response tokens
             temperature: Sampling temperature
+            enable_web_search: Override whether web search can be used
 
         Returns:
             APIResponse with the result
@@ -5787,6 +5873,19 @@ class AIOrchestrator:
             status_callback, StatusStage.CLASSIFYING, "Classifying task..."
         )
         task_types = TaskClassifier.classify(prompt)
+        task_set = {task for task, _ in task_types}
+        web_search_enabled = (
+            self.enable_web_search
+            if enable_web_search is None
+            else enable_web_search
+        )
+        request_web_search = bool(
+            web_search_enabled
+            and (
+                TaskType.WEB_SEARCH in task_set
+                or self._prompt_requests_current_info(prompt)
+            )
+        )
 
         if self.verbose:
             logger.info(f"Classified task types: {task_types}")
@@ -6043,7 +6142,9 @@ class AIOrchestrator:
             self.conversation_history.extend(messages)
 
         # Emit status based on provider type
-        if model.provider == "perplexity":
+        if model.provider == "perplexity" or (
+            model.provider == "openai" and request_web_search
+        ):
             await self._emit_status(
                 status_callback,
                 StatusStage.SEARCHING,
@@ -6077,6 +6178,7 @@ class AIOrchestrator:
                 model=model.model_id,
                 max_tokens=max_tokens,
                 temperature=temperature,
+                web_search=request_web_search,
             )
             last_response = response
             if (

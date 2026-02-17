@@ -40,6 +40,11 @@
           "description": "Use the LLM router for every prompt (not just multi-task prompts)",
           "default": false
         },
+        "enableWebSearch": {
+          "type": "boolean",
+          "description": "Allow supported models to use web search for current-information prompts",
+          "default": true
+        },
         "routingModel": {
           "type": "string",
           "description": "Model registry key (or raw model id) used for LLM routing",

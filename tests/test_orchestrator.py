@@ -340,6 +340,111 @@ class TestAIOrchestrator:
         assert response.success is False
         assert "unknown model" in response.error.lower()
 
+    @pytest.mark.asyncio
+    async def test_query_enables_openai_web_search_for_current_info(self, monkeypatch):
+        """Should pass web_search=True to OpenAI models on current-info prompts."""
+
+        class FakeOpenAIProvider(BaseProvider):
+            def __init__(self, rate_limiter: RateLimiter) -> None:
+                super().__init__(rate_limiter)
+                self.last_kwargs: dict[str, object] = {}
+
+            @property
+            def provider_name(self) -> str:
+                return "openai"
+
+            async def initialize(self) -> bool:
+                return True
+
+            async def complete(self, messages, model, **kwargs):
+                self.last_kwargs = dict(kwargs)
+                return APIResponse(
+                    content="fresh answer",
+                    model=model,
+                    provider=self.provider_name,
+                    usage={},
+                    latency_ms=0,
+                    success=True,
+                )
+
+        orchestrator = AIOrchestrator(
+            verbose=False,
+            incognito=True,
+            enable_web_search=True,
+        )
+        provider = FakeOpenAIProvider(orchestrator.rate_limiter)
+
+        async def fake_get_provider(_name, **_kwargs):
+            return provider
+
+        monkeypatch.setattr(orchestrator, "_get_provider", fake_get_provider)
+        monkeypatch.setattr(
+            orchestrator_module.TaskClassifier,
+            "classify",
+            lambda _prompt: [(TaskType.WEB_SEARCH, 0.95), (TaskType.GENERAL_NLP, 0.4)],
+        )
+
+        response = await orchestrator.query(
+            "What is the latest OpenAI news today?",
+            model_override="o3-pro",
+        )
+
+        assert response.success is True
+        assert provider.last_kwargs.get("web_search") is True
+
+    @pytest.mark.asyncio
+    async def test_query_allows_disabling_openai_web_search(self, monkeypatch):
+        """Per-query web search override should disable OpenAI web search."""
+
+        class FakeOpenAIProvider(BaseProvider):
+            def __init__(self, rate_limiter: RateLimiter) -> None:
+                super().__init__(rate_limiter)
+                self.last_kwargs: dict[str, object] = {}
+
+            @property
+            def provider_name(self) -> str:
+                return "openai"
+
+            async def initialize(self) -> bool:
+                return True
+
+            async def complete(self, messages, model, **kwargs):
+                self.last_kwargs = dict(kwargs)
+                return APIResponse(
+                    content="answer",
+                    model=model,
+                    provider=self.provider_name,
+                    usage={},
+                    latency_ms=0,
+                    success=True,
+                )
+
+        orchestrator = AIOrchestrator(
+            verbose=False,
+            incognito=True,
+            enable_web_search=True,
+        )
+        provider = FakeOpenAIProvider(orchestrator.rate_limiter)
+
+        async def fake_get_provider(_name, **_kwargs):
+            return provider
+
+        monkeypatch.setattr(orchestrator, "_get_provider", fake_get_provider)
+        monkeypatch.setattr(
+            orchestrator_module.TaskClassifier,
+            "classify",
+            lambda _prompt: [(TaskType.WEB_SEARCH, 0.95)],
+        )
+
+        response = await orchestrator.query(
+            "Find the latest updates",
+            model_override="o3-pro",
+            enable_web_search=False,
+        )
+
+        assert response.success is True
+        assert provider.last_kwargs.get("web_search") is False
+
     def test_clear_history(self, orchestrator):
         """Should clear conversation history"""
         orchestrator.conversation_history = [
