@@ -7,6 +7,9 @@ Application settings and preferences.
 
 from __future__ import annotations
 
+import shutil
+import subprocess  # nosec B404
+
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -431,8 +434,6 @@ class SettingsDialog(QDialog):
 
     def _open_configure(self) -> None:
         """Open terminal to configure API keys."""
-        import subprocess
-
         try:
             script = """
             tell application "Terminal"
@@ -440,7 +441,10 @@ class SettingsDialog(QDialog):
                 activate
             end tell
             """
-            subprocess.Popen(["osascript", "-e", script])  # noqa: S603
+            osascript_path = shutil.which("osascript")
+            if osascript_path is None:
+                raise FileNotFoundError("Could not locate 'osascript'")
+            subprocess.Popen([osascript_path, "-e", script])  # noqa: S603  # nosec B603
         except Exception as e:
             QMessageBox.warning(
                 self,

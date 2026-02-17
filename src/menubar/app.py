@@ -15,6 +15,8 @@ Or after installation:
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess  # nosec B404
 import sys
 import threading
 from typing import Any
@@ -174,6 +176,7 @@ class AIMenuBarApp(rumps.App):
             "ROUTING": "Routing...",
             "ROUTING_LLM": "Analyzing...",
             "SELECTING": "Selecting...",
+            "DOWNLOADING": "Downloading...",
             "CHAINING": "Chaining...",
             "GENERATING": "Generating...",
             "THINKING": "Thinking...",
@@ -184,6 +187,8 @@ class AIMenuBarApp(rumps.App):
             """Handle status updates."""
             stage_name = status.stage.name
             msg = status_messages.get(stage_name, "Processing...")
+            if stage_name == "DOWNLOADING" and status.progress is not None:
+                msg = f"Downloading {int(status.progress * 100)}%"
             self.title = f"AI: {msg}"
 
         def run_async() -> None:
@@ -232,10 +237,8 @@ class AIMenuBarApp(rumps.App):
     @rumps.clicked("Open GUI App")
     def open_gui(self, _: Any) -> None:
         """Open the GUI application."""
-        import subprocess
-
         try:
-            subprocess.Popen([sys.executable, "-m", "src.gui.app"])  # noqa: S603
+            subprocess.Popen([sys.executable, "-m", "src.gui.app"])  # noqa: S603  # nosec B603
             rumps.notification(
                 title="AI Orchestrator",
                 subtitle="",
@@ -247,8 +250,6 @@ class AIMenuBarApp(rumps.App):
     @rumps.clicked("Open Terminal UI")
     def open_tui(self, _: Any) -> None:
         """Open the terminal UI in a new Terminal window."""
-        import subprocess
-
         try:
             # Open Terminal and run the TUI
             script = f'''
@@ -257,7 +258,10 @@ class AIMenuBarApp(rumps.App):
                 activate
             end tell
             '''
-            subprocess.Popen(["osascript", "-e", script])  # noqa: S603
+            osascript_path = shutil.which("osascript")
+            if osascript_path is None:
+                raise FileNotFoundError("Could not locate 'osascript'")
+            subprocess.Popen([osascript_path, "-e", script])  # noqa: S603  # nosec B603
         except Exception as e:
             rumps.alert(title="Error", message=f"Could not open TUI: {e}")
 
@@ -354,8 +358,6 @@ class AIMenuBarApp(rumps.App):
     @rumps.clicked("Copy Last Response")
     def copy_last(self, _: Any) -> None:
         """Copy last response to clipboard."""
-        import subprocess
-
         if not self._last_response:
             rumps.alert(
                 title="Nothing to Copy",
@@ -365,11 +367,14 @@ class AIMenuBarApp(rumps.App):
 
         try:
             # Use pbcopy on macOS
-            process = subprocess.Popen(
-                ["pbcopy"],
+            pbcopy_path = shutil.which("pbcopy")
+            if pbcopy_path is None:
+                raise FileNotFoundError("Could not locate 'pbcopy'")
+            process = subprocess.Popen(  # noqa: S603
+                [pbcopy_path],
                 stdin=subprocess.PIPE,
                 text=True,
-            )
+            )  # nosec B603
             process.communicate(input=self._last_response)
             rumps.notification(
                 title="AI Orchestrator",
@@ -382,8 +387,6 @@ class AIMenuBarApp(rumps.App):
     @rumps.clicked("Configure API Keys")
     def configure_keys(self, _: Any) -> None:
         """Open terminal to configure API keys."""
-        import subprocess
-
         try:
             script = f'''
             tell application "Terminal"
@@ -391,7 +394,10 @@ class AIMenuBarApp(rumps.App):
                 activate
             end tell
             '''
-            subprocess.Popen(["osascript", "-e", script])  # noqa: S603
+            osascript_path = shutil.which("osascript")
+            if osascript_path is None:
+                raise FileNotFoundError("Could not locate 'osascript'")
+            subprocess.Popen([osascript_path, "-e", script])  # noqa: S603  # nosec B603
         except Exception as e:
             rumps.alert(title="Error", message=f"Could not open configuration: {e}")
 

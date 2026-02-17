@@ -17,6 +17,8 @@ import hashlib
 import json
 import logging
 import os
+import shutil
+import subprocess  # nosec B404
 import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -128,7 +130,8 @@ class KeyringBackend(CredentialBackend):
     def is_available(self) -> bool:
         if not KEYRING_AVAILABLE:
             return False
-        assert _keyring is not None
+        if _keyring is None:
+            return False
         try:
             # Test if keyring is functional
             _keyring.get_password(SERVICE_NAME, "__test__")
@@ -139,8 +142,9 @@ class KeyringBackend(CredentialBackend):
     def get(self, provider: str) -> str | None:
         if not self.is_available:
             return None
+        if _keyring is None:
+            return None
         try:
-            assert _keyring is not None
             value = _keyring.get_password(SERVICE_NAME, provider)
             return value if isinstance(value, str) else None
         except Exception as e:
@@ -150,8 +154,9 @@ class KeyringBackend(CredentialBackend):
     def set(self, provider: str, api_key: str) -> bool:
         if not self.is_available:
             return False
+        if _keyring is None:
+            return False
         try:
-            assert _keyring is not None
             _keyring.set_password(SERVICE_NAME, provider, api_key)
             logger.info(f"Stored credential in keyring for: {provider}")
             return True
@@ -162,8 +167,9 @@ class KeyringBackend(CredentialBackend):
     def delete(self, provider: str) -> bool:
         if not self.is_available:
             return False
+        if _keyring is None:
+            return False
         try:
-            assert _keyring is not None
             _keyring.delete_password(SERVICE_NAME, provider)
             return True
         except Exception as e:
@@ -193,14 +199,15 @@ class EncryptedFileBackend(CredentialBackend):
         # Collect stable machine identifiers
         if sys.platform == "darwin":
             try:
-                import subprocess
-
-                result = subprocess.run(
-                    ["ioreg", "-rd1", "-c", "IOPlatformExpertDevice"],
+                ioreg_path = shutil.which("ioreg")
+                if ioreg_path is None:
+                    raise FileNotFoundError("Could not locate 'ioreg' in PATH")
+                result = subprocess.run(  # noqa: S603
+                    [ioreg_path, "-rd1", "-c", "IOPlatformExpertDevice"],
                     capture_output=True,
                     text=True,
                     check=False,
-                )
+                )  # nosec B603
                 for line in result.stdout.split("\n"):
                     if "IOPlatformUUID" in line:
                         identifiers.append(line.split('"')[-2])
@@ -233,9 +240,10 @@ class EncryptedFileBackend(CredentialBackend):
             return
 
         try:
-            assert (
-                _Fernet is not None and _hashes is not None and _PBKDF2HMAC is not None
-            )
+            if _Fernet is None or _hashes is None or _PBKDF2HMAC is None:
+                logger.error("Cryptography modules are unavailable")
+                self._fernet = None
+                return
             # Derive key from machine ID
             salt = b"ai_orchestrator_v1"  # Static salt for key derivation
             kdf = _PBKDF2HMAC(
@@ -262,7 +270,9 @@ class EncryptedFileBackend(CredentialBackend):
             with open(ENCRYPTED_CREDS_FILE, "rb") as f:
                 encrypted = f.read()
             fernet = self._fernet
-            assert fernet is not None
+            if fernet is None:
+                logger.error("Encryption backend unavailable while loading credentials")
+                return {}
             decrypted = fernet.decrypt(encrypted)
             loaded: dict[str, Any] = json.loads(decrypted.decode())
             # Ensure we always return a mapping of strings to strings
@@ -278,7 +288,9 @@ class EncryptedFileBackend(CredentialBackend):
 
         try:
             fernet = self._fernet
-            assert fernet is not None
+            if fernet is None:
+                logger.error("Encryption backend unavailable while saving credentials")
+                return False
             encrypted = fernet.encrypt(json.dumps(creds).encode())
 
             # Write atomically with restricted permissions

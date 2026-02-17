@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QMenu,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -335,6 +336,7 @@ class StatusIndicator(QFrame):
         "routing": "Routing to best model...",
         "routing_llm": "Analyzing with router...",
         "selecting": "Selecting model...",
+        "downloading": "Downloading local model...",
         "chaining": "Executing model chain...",
         "generating": "Generating response...",
         "thinking": "Thinking deeply...",
@@ -346,6 +348,8 @@ class StatusIndicator(QFrame):
         self._dots = 0
         self._stage = "generating"
         self._model: str | None = None
+        self._progress: float | None = None
+        self._custom_message: str | None = None
         self._setup_ui()
 
         # Animation timer
@@ -354,8 +358,12 @@ class StatusIndicator(QFrame):
         self._timer.start(400)
 
     def _setup_ui(self) -> None:
-        layout = QHBoxLayout(self)
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(6)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
 
         # Animated spinner (using unicode dot)
         self._spinner = QLabel("●")
@@ -363,7 +371,7 @@ class StatusIndicator(QFrame):
             color: {COLORS["text_accent"]};
             font-size: 14px;
         """)
-        layout.addWidget(self._spinner)
+        top_row.addWidget(self._spinner)
 
         # Status text
         self._label = QLabel(self.STATUS_MESSAGES.get("generating", "Generating..."))
@@ -372,8 +380,28 @@ class StatusIndicator(QFrame):
             font-size: 14px;
             margin-left: 8px;
         """)
-        layout.addWidget(self._label)
-        layout.addStretch()
+        top_row.addWidget(self._label)
+        top_row.addStretch()
+        layout.addLayout(top_row)
+
+        self._progress_bar = QProgressBar()
+        self._progress_bar.setRange(0, 100)
+        self._progress_bar.setValue(0)
+        self._progress_bar.setTextVisible(False)
+        self._progress_bar.hide()
+        self._progress_bar.setStyleSheet(f"""
+            QProgressBar {{
+                border: 1px solid {COLORS["border"]};
+                border-radius: 4px;
+                background: {COLORS["bg_tertiary"]};
+                height: 8px;
+            }}
+            QProgressBar::chunk {{
+                background-color: {COLORS["text_accent"]};
+                border-radius: 3px;
+            }}
+        """)
+        layout.addWidget(self._progress_bar)
 
         self.setStyleSheet(f"""
             QFrame {{
@@ -386,19 +414,37 @@ class StatusIndicator(QFrame):
     def _animate(self) -> None:
         """Animate the dots."""
         self._dots = (self._dots + 1) % 4
-        base_msg = self.STATUS_MESSAGES.get(self._stage, "Processing")
-        # Remove existing dots and add new
-        base_msg = base_msg.rstrip(".")
-        msg = base_msg + "." * (self._dots + 1)
+        base_msg = self._custom_message or self.STATUS_MESSAGES.get(
+            self._stage, "Processing"
+        )
+        msg = base_msg
+        if self._stage != "downloading":
+            base_msg = base_msg.rstrip(".")
+            msg = base_msg + "." * (self._dots + 1)
         if self._model:
             msg += f" ({self._model})"
         self._label.setText(msg)
 
-    def set_status(self, stage: str, model: str | None = None) -> None:
+    def set_status(
+        self,
+        stage: str,
+        model: str | None = None,
+        progress: float | None = None,
+        message: str | None = None,
+    ) -> None:
         """Update the displayed status."""
         self._stage = stage
         self._model = model
+        self._progress = progress
+        self._custom_message = message
         self._dots = 0
+
+        if stage == "downloading" and progress is not None:
+            self._progress_bar.show()
+            self._progress_bar.setValue(int(max(0, min(100, round(progress * 100)))))
+        else:
+            self._progress_bar.hide()
+
         self._animate()
 
     def stop(self) -> None:
@@ -465,10 +511,16 @@ class ChatWidget(QScrollArea):
 
         return self._streaming_bubble
 
-    def update_status(self, stage: str, model: str | None = None) -> None:
+    def update_status(
+        self,
+        stage: str,
+        model: str | None = None,
+        progress: float | None = None,
+        message: str | None = None,
+    ) -> None:
         """Update the status indicator."""
         if self._status_indicator:
-            self._status_indicator.set_status(stage, model)
+            self._status_indicator.set_status(stage, model, progress, message)
 
     def finish_streaming(self) -> None:
         """Finalize the streaming response."""

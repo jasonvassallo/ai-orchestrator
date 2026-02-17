@@ -419,7 +419,12 @@ class MainWindow(QMainWindow):
             # Status callback for UI updates
             def on_status(status: AgentStatus) -> None:
                 stage_name = status.stage.name.lower()
-                self.chat_widget.update_status(stage_name, status.model)
+                self.chat_widget.update_status(
+                    stage_name,
+                    status.model,
+                    status.progress,
+                    status.message,
+                )
 
             # Query the orchestrator
             response = await self._orchestrator.query(

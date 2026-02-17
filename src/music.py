@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import subprocess  # nosec B404
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -297,7 +298,7 @@ class MusicParameters:
         # Get BPM, default to 124-128 range for tech house
         bpm = data.get("bpm")
         if not bpm:
-            bpm = random.randint(124, 128)  # noqa: S311
+            bpm = random.randint(124, 128)  # noqa: S311  # nosec B311
 
         # Get MusicGen model (default to small for faster generation)
         musicgen_model = data.get("musicgen_model", "musicgen-small")
@@ -372,9 +373,9 @@ def create_drums_midi(params: MusicParameters, filename_base: str) -> str:
                 time = step / steps_per_beat
                 # Humanize velocity
                 base_velocity = 80 + int(params.energy * 40)
-                velocity = min(127, base_velocity + random.randint(-10, 10))  # noqa: S311
+                velocity = min(127, base_velocity + random.randint(-10, 10))  # noqa: S311  # nosec B311
                 # Slight timing humanization
-                time_offset = random.uniform(-0.01, 0.01)  # noqa: S311
+                time_offset = random.uniform(-0.01, 0.01)  # noqa: S311  # nosec B311
                 midi.addNote(0, 9, note, max(0, time + time_offset), 0.2, velocity)
 
     output_path = get_output_dir() / f"{filename_base}_drums.mid"
@@ -420,11 +421,11 @@ def create_bass_midi(params: MusicParameters, filename_base: str) -> str:
             beat = current_beat + beat_offset
 
             # Main bass hit on the beat
-            velocity = min(127, 90 + int(params.energy * 30) + random.randint(-5, 5))  # noqa: S311
+            velocity = min(127, 90 + int(params.energy * 30) + random.randint(-5, 5))  # noqa: S311  # nosec B311
             midi.addNote(0, 0, bass_note, beat, 0.4, velocity)
 
             # Occasional offbeat ghost note (funky element)
-            if random.random() < 0.3 and params.genre in [  # noqa: S311
+            if random.random() < 0.3 and params.genre in [  # noqa: S311  # nosec B311
                 "funky_90s",
                 "tech_house_90s",
             ]:
@@ -543,7 +544,7 @@ def create_combined_midi(params: MusicParameters, filename_base: str) -> str:
                 time = step / steps_per_beat
                 velocity = min(
                     127,
-                    80 + int(params.energy * 40) + random.randint(-8, 8),  # noqa: S311
+                    80 + int(params.energy * 40) + random.randint(-8, 8),  # noqa: S311  # nosec B311
                 )
                 midi.addNote(0, 9, note, time, 0.2, velocity)
 
@@ -644,8 +645,6 @@ async def generate_audio_with_musicgen(
 
                 output_path = get_output_dir() / f"{filename_base}_audio.wav"
 
-                import subprocess
-
                 # Get the selected MusicGen model ID
                 model_id = get_musicgen_model_id(params.musicgen_model)
 
@@ -663,7 +662,7 @@ async def generate_audio_with_musicgen(
                 ]
                 res = subprocess.run(  # noqa: S603
                     cmd, capture_output=True, text=True, check=False
-                )
+                )  # nosec B603
                 if res.returncode == 0:
                     path_str = res.stdout.strip().splitlines()[-1]
                     if Path(path_str).exists():
