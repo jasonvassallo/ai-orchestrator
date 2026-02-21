@@ -397,48 +397,6 @@
       "reasoning"
     ]
   },
-  "mlx-qwen2.5-coder-14b": {
-    "name": "MLX Qwen 2.5 Coder 14B",
-    "provider": "mlx",
-    "modelId": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
-    "contextWindow": 32768,
-    "costPer1kInput": 0.0,
-    "costPer1kOutput": 0.0,
-    "strengths": [
-      "complex coding",
-      "debugging",
-      "refactoring",
-      "local",
-      "private"
-    ],
-    "taskTypes": [
-      "code",
-      "general",
-      "local",
-      "reasoning"
-    ]
-  },
-  "mlx-qwen3-4b": {
-    "name": "MLX Qwen3 4B",
-    "provider": "mlx",
-    "modelId": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
-    "contextWindow": 32768,
-    "costPer1kInput": 0.0,
-    "costPer1kOutput": 0.0,
-    "strengths": [
-      "daily use",
-      "coding",
-      "fast",
-      "local",
-      "private",
-      "efficient"
-    ],
-    "taskTypes": [
-      "code",
-      "general",
-      "local"
-    ]
-  },
   "mlx-qwen3-coder-30b": {
     "name": "MLX Qwen3 Coder 30B",
     "provider": "mlx",
@@ -460,10 +418,10 @@
       "reasoning"
     ]
   },
-  "mlx-qwen3-vl-4b": {
-    "name": "MLX Qwen3 VL 4B",
+  "mlx-qwen3-vl-30b": {
+    "name": "MLX Qwen3 VL 30B",
     "provider": "mlx",
-    "modelId": "mlx-community/Qwen3-VL-4B-Instruct-8bit",
+    "modelId": "mlx-community/Qwen3-VL-30B-A3B-Instruct-4bit",
     "contextWindow": 32768,
     "costPer1kInput": 0.0,
     "costPer1kOutput": 0.0,
@@ -471,8 +429,8 @@
       "vision",
       "image understanding",
       "captioning",
-      "8-bit precision",
-      "fast",
+      "multimodal reasoning",
+      "30B A3B 4-bit",
       "local",
       "private"
     ],
@@ -480,6 +438,7 @@
       "general",
       "local",
       "multimodal",
+      "reasoning",
       "summarization"
     ]
   }

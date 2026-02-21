@@ -8,7 +8,7 @@ The primary application window with chat interface.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QAction, QKeySequence
@@ -30,6 +30,7 @@ from .sidebar import Sidebar
 from .styles import STYLESHEET
 
 if TYPE_CHECKING:
+    from ..agent.runner import AgentRunner
     from ..orchestrator import AgentStatus, AIOrchestrator
 
 
@@ -60,12 +61,126 @@ class MainWindow(QMainWindow):
         self._storage = get_storage()
         self._current_conversation: Conversation | None = None
         self._orchestrator: AIOrchestrator | None = None
+        self._agent_runner: AgentRunner | None = None
+        self._runtime_settings: dict[str, Any] = self._default_runtime_settings()
         self._is_processing = False
 
         self._setup_ui()
         self._setup_menu_bar()
         self._load_conversations()
         self._init_orchestrator()
+
+    @staticmethod
+    def _default_runtime_settings() -> dict[str, Any]:
+        return {
+            "max_tokens": 4096,
+            "temperature": 0.7,
+            "agent_enabled_default": False,
+            "agent_default_session": "gui-default",
+            "agent_default_model": "mlx-qwen3-coder-30b",
+            "agent_web_tools": True,
+            "agent_mcp_enabled": True,
+            "agent_skills_enabled": True,
+            "agent_browser_enabled": False,
+        }
+
+    @staticmethod
+    def _coerce_bool(value: Any, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        return default
+
+    @staticmethod
+    def _coerce_int(value: Any, default: int, *, minimum: int) -> int:
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            return max(minimum, value)
+        return default
+
+    @staticmethod
+    def _coerce_float(value: Any, default: float, *, minimum: float) -> float:
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, (int, float)):
+            return max(minimum, float(value))
+        return default
+
+    @staticmethod
+    def _coerce_str(value: Any, default: str) -> str:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+        return default
+
+    def _load_runtime_settings_from_orchestrator(self) -> None:
+        settings = self._default_runtime_settings()
+        if self._orchestrator is None:
+            self._runtime_settings = settings
+            return
+
+        user_config = getattr(self._orchestrator, "_user_config", {})
+        if not isinstance(user_config, dict):
+            self._runtime_settings = settings
+            return
+
+        defaults = user_config.get("defaults", {})
+        if isinstance(defaults, dict):
+            settings["max_tokens"] = self._coerce_int(
+                defaults.get("maxTokens"),
+                settings["max_tokens"],
+                minimum=100,
+            )
+            settings["temperature"] = self._coerce_float(
+                defaults.get("temperature"),
+                settings["temperature"],
+                minimum=0.0,
+            )
+
+        agent_cfg = user_config.get("agent", {})
+        if isinstance(agent_cfg, dict):
+            settings["agent_enabled_default"] = self._coerce_bool(
+                agent_cfg.get("enabledByDefault"),
+                settings["agent_enabled_default"],
+            )
+            settings["agent_default_session"] = self._coerce_str(
+                agent_cfg.get("defaultSessionId"),
+                settings["agent_default_session"],
+            )
+            settings["agent_default_model"] = self._coerce_str(
+                agent_cfg.get("defaultModel"),
+                settings["agent_default_model"],
+            )
+            settings["agent_web_tools"] = self._coerce_bool(
+                agent_cfg.get("enableWebTools"),
+                settings["agent_web_tools"],
+            )
+            settings["agent_mcp_enabled"] = self._coerce_bool(
+                agent_cfg.get("enableMcp"),
+                settings["agent_mcp_enabled"],
+            )
+            settings["agent_skills_enabled"] = self._coerce_bool(
+                agent_cfg.get("enableSkills"),
+                settings["agent_skills_enabled"],
+            )
+            settings["agent_browser_enabled"] = self._coerce_bool(
+                agent_cfg.get("enableBrowserAutomation"),
+                settings["agent_browser_enabled"],
+            )
+
+        self._runtime_settings = settings
+
+    def _apply_runtime_settings_to_input(self) -> None:
+        self.input_widget.apply_agent_defaults(
+            enabled=bool(self._runtime_settings.get("agent_enabled_default", False)),
+            browser_automation=bool(
+                self._runtime_settings.get("agent_browser_enabled", False)
+            ),
+        )
+        default_model = self._runtime_settings.get("agent_default_model")
+        if isinstance(default_model, str):
+            self.input_widget.set_model_by_id(default_model)
 
     def _setup_ui(self) -> None:
         """Set up the user interface."""
@@ -280,9 +395,13 @@ class MainWindow(QMainWindow):
     def _init_orchestrator(self) -> None:
         """Initialize the AI orchestrator."""
         try:
+            from ..agent.runner import AgentRunner
             from ..orchestrator import AIOrchestrator
 
             self._orchestrator = AIOrchestrator(verbose=False)
+            self._agent_runner = AgentRunner(self._orchestrator)
+            self._load_runtime_settings_from_orchestrator()
+            self._apply_runtime_settings_to_input()
         except Exception as e:
             QMessageBox.warning(
                 self,
@@ -333,8 +452,20 @@ class MainWindow(QMainWindow):
 
     def _apply_settings(self, settings: dict) -> None:
         """Apply settings changes."""
-        # TODO: Apply settings to orchestrator and UI
-        pass
+        self._init_orchestrator()
+        if isinstance(settings, dict):
+            max_tokens = self._coerce_int(
+                settings.get("max_tokens"),
+                int(self._runtime_settings.get("max_tokens", 4096)),
+                minimum=100,
+            )
+            temperature = self._coerce_float(
+                settings.get("temperature"),
+                float(self._runtime_settings.get("temperature", 0.7)),
+                minimum=0.0,
+            )
+            self._runtime_settings["max_tokens"] = max_tokens
+            self._runtime_settings["temperature"] = temperature
 
     def _on_message_sent(self, message: str, settings: dict) -> None:
         """Handle a message being sent."""
@@ -386,6 +517,16 @@ class MainWindow(QMainWindow):
             # Prepare query parameters
             model_override = settings.get("model")
             system_prompt = None
+            max_tokens = self._coerce_int(
+                self._runtime_settings.get("max_tokens"),
+                4096,
+                minimum=100,
+            )
+            temperature = self._coerce_float(
+                self._runtime_settings.get("temperature"),
+                0.7,
+                minimum=0.0,
+            )
 
             # Handle special modes
             if settings.get("thinking"):
@@ -426,13 +567,53 @@ class MainWindow(QMainWindow):
                     status.message,
                 )
 
-            # Query the orchestrator
-            response = await self._orchestrator.query(
-                message,
-                model_override=model_override,
-                system_prompt=system_prompt,
-                status_callback=on_status,
-            )
+            if settings.get("agent_mode") and self._agent_runner is not None:
+                from ..agent.runner import AgentRunOptions
+
+                if settings.get("browser_automation"):
+                    self.chat_widget.add_message(
+                        "system",
+                        (
+                            "Warning: Browser automation is enabled and may perform real "
+                            "actions on live websites."
+                        ),
+                    )
+
+                response = await self._agent_runner.run(
+                    message,
+                    options=AgentRunOptions(
+                        session_id=self._coerce_str(
+                            self._runtime_settings.get("agent_default_session"),
+                            "gui-default",
+                        ),
+                        model_override=model_override,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        enable_web_tools=bool(settings.get("web_search"))
+                        and bool(self._runtime_settings.get("agent_web_tools", True)),
+                        enable_mcp=bool(self._runtime_settings.get("agent_mcp_enabled", True)),
+                        enable_skills=bool(
+                            self._runtime_settings.get("agent_skills_enabled", True)
+                        ),
+                        enable_browser_automation=bool(settings.get("browser_automation"))
+                        and bool(
+                            self._runtime_settings.get("agent_browser_enabled", False)
+                        ),
+                        incognito=settings.get("incognito", False),
+                        system_prompt=system_prompt,
+                    ),
+                    status_callback=on_status,
+                )
+            else:
+                # Query the orchestrator
+                response = await self._orchestrator.query(
+                    message,
+                    model_override=model_override,
+                    system_prompt=system_prompt,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    status_callback=on_status,
+                )
 
             # Update the streaming bubble with final content
             streaming_bubble.content = response.content

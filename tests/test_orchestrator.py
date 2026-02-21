@@ -910,7 +910,7 @@ class TestLLMRouter:
         task_types = [(TaskType.GENERAL_NLP, 0.8)]
         decision = await router.route("Hello", task_types)
 
-        assert decision.models == ["mlx-qwen3-4b"]
+        assert decision.models == ["mlx-ministral-14b-reasoning"]
 
     def test_prefilter_candidates_limits_to_10(self, rate_limiter):
         """Should return at most 10 candidates"""

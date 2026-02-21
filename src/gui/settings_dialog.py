@@ -7,6 +7,7 @@ Application settings and preferences.
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess  # nosec B404
 
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QSlider,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..credentials import CONFIG_DIR
 from .styles import COLORS
 
 
@@ -76,6 +79,7 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._create_models_tab(), "Models")
         tabs.addTab(self._create_api_keys_tab(), "API Keys")
         tabs.addTab(self._create_appearance_tab(), "Appearance")
+        tabs.addTab(self._create_agent_tab(), "Agent")
         tabs.addTab(self._create_advanced_tab(), "Advanced")
         layout.addWidget(tabs)
 
@@ -399,13 +403,275 @@ class SettingsDialog(QDialog):
         layout.addStretch()
         return widget
 
+    def _create_agent_tab(self) -> QWidget:
+        """Create dedicated agent settings tab."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(16)
+
+        # Core agent options
+        core_group = QGroupBox("Agent Core")
+        core_layout = QFormLayout(core_group)
+
+        self.agent_enabled_default = QCheckBox("Enable Agent mode by default")
+        core_layout.addRow(self.agent_enabled_default)
+
+        self.agent_default_session = QLineEdit()
+        self.agent_default_session.setPlaceholderText("default")
+        core_layout.addRow("Default Session ID:", self.agent_default_session)
+
+        self.agent_profile = QComboBox()
+        self.agent_profile.addItems(["fast", "balanced", "deep"])
+        self.agent_profile.setCurrentText("balanced")
+        core_layout.addRow("Execution Profile:", self.agent_profile)
+
+        self.agent_default_model = QLineEdit()
+        self.agent_default_model.setPlaceholderText("mlx-qwen3-coder-30b")
+        core_layout.addRow("Default Agent Model:", self.agent_default_model)
+
+        self.agent_web_tools = QCheckBox("Enable web_search/web_fetch tools")
+        self.agent_web_tools.setChecked(True)
+        core_layout.addRow(self.agent_web_tools)
+
+        self.agent_mcp_enabled = QCheckBox("Enable MCP discovery and tools")
+        self.agent_mcp_enabled.setChecked(True)
+        core_layout.addRow(self.agent_mcp_enabled)
+
+        self.agent_skills_enabled = QCheckBox("Enable skills discovery")
+        self.agent_skills_enabled.setChecked(True)
+        core_layout.addRow(self.agent_skills_enabled)
+
+        self.agent_browser_enabled = QCheckBox(
+            "Enable browser automation (dangerous)"
+        )
+        core_layout.addRow(self.agent_browser_enabled)
+
+        layout.addWidget(core_group)
+
+        # Compatibility sources
+        compatibility_group = QGroupBox("Compatibility Sources")
+        compatibility_layout = QFormLayout(compatibility_group)
+
+        self.agent_source_codex = QCheckBox("Codex")
+        self.agent_source_codex.setChecked(True)
+        compatibility_layout.addRow(self.agent_source_codex)
+
+        self.agent_source_claude = QCheckBox("Claude")
+        self.agent_source_claude.setChecked(True)
+        compatibility_layout.addRow(self.agent_source_claude)
+
+        self.agent_source_gemini = QCheckBox("Gemini")
+        self.agent_source_gemini.setChecked(True)
+        compatibility_layout.addRow(self.agent_source_gemini)
+
+        layout.addWidget(compatibility_group)
+
+        # Limits and timeouts
+        limits_group = QGroupBox("Limits & Timeouts")
+        limits_layout = QFormLayout(limits_group)
+
+        self.agent_max_steps = QSpinBox()
+        self.agent_max_steps.setRange(1, 100)
+        self.agent_max_steps.setValue(10)
+        limits_layout.addRow("Max Steps:", self.agent_max_steps)
+
+        self.agent_model_timeout = QSpinBox()
+        self.agent_model_timeout.setRange(1, 600)
+        self.agent_model_timeout.setValue(90)
+        limits_layout.addRow("Model Timeout (s):", self.agent_model_timeout)
+
+        self.agent_tool_timeout = QSpinBox()
+        self.agent_tool_timeout.setRange(1, 600)
+        self.agent_tool_timeout.setValue(40)
+        limits_layout.addRow("Tool Timeout (s):", self.agent_tool_timeout)
+
+        self.agent_shell_timeout = QSpinBox()
+        self.agent_shell_timeout.setRange(1, 600)
+        self.agent_shell_timeout.setValue(30)
+        limits_layout.addRow("Shell Timeout (s):", self.agent_shell_timeout)
+
+        self.agent_web_search_timeout = QSpinBox()
+        self.agent_web_search_timeout.setRange(1, 600)
+        self.agent_web_search_timeout.setValue(20)
+        limits_layout.addRow("Web Search Timeout (s):", self.agent_web_search_timeout)
+
+        self.agent_web_fetch_timeout = QSpinBox()
+        self.agent_web_fetch_timeout.setRange(1, 600)
+        self.agent_web_fetch_timeout.setValue(25)
+        limits_layout.addRow("Web Fetch Timeout (s):", self.agent_web_fetch_timeout)
+
+        self.agent_max_prompt_chars = QSpinBox()
+        self.agent_max_prompt_chars.setRange(2000, 1000000)
+        self.agent_max_prompt_chars.setValue(24000)
+        limits_layout.addRow("Max Prompt Chars:", self.agent_max_prompt_chars)
+
+        self.agent_max_tool_output_chars = QSpinBox()
+        self.agent_max_tool_output_chars.setRange(500, 1000000)
+        self.agent_max_tool_output_chars.setValue(10000)
+        limits_layout.addRow(
+            "Max Tool Output Chars:", self.agent_max_tool_output_chars
+        )
+
+        self.agent_max_shell_output_chars = QSpinBox()
+        self.agent_max_shell_output_chars.setRange(200, 1000000)
+        self.agent_max_shell_output_chars.setValue(8000)
+        limits_layout.addRow(
+            "Max Shell Output Chars:", self.agent_max_shell_output_chars
+        )
+
+        self.agent_max_fetched_chars = QSpinBox()
+        self.agent_max_fetched_chars.setRange(500, 1000000)
+        self.agent_max_fetched_chars.setValue(12000)
+        limits_layout.addRow("Max Fetched Chars:", self.agent_max_fetched_chars)
+
+        self.agent_max_web_results = QSpinBox()
+        self.agent_max_web_results.setRange(1, 100)
+        self.agent_max_web_results.setValue(8)
+        limits_layout.addRow("Max Web Results:", self.agent_max_web_results)
+
+        self.agent_max_memory_context_chars = QSpinBox()
+        self.agent_max_memory_context_chars.setRange(500, 1000000)
+        self.agent_max_memory_context_chars.setValue(9000)
+        limits_layout.addRow(
+            "Max Memory Context Chars:", self.agent_max_memory_context_chars
+        )
+
+        self.agent_max_history_messages = QSpinBox()
+        self.agent_max_history_messages.setRange(1, 500)
+        self.agent_max_history_messages.setValue(24)
+        limits_layout.addRow(
+            "Max History Messages:", self.agent_max_history_messages
+        )
+
+        layout.addWidget(limits_group)
+        layout.addStretch()
+        return widget
+
     def _load_settings(self) -> None:
         """Load settings from storage."""
-        # TODO: Load from config file or database
-        pass
+        config_path = CONFIG_DIR / "config.json"
+        if not config_path.exists():
+            return
+
+        try:
+            with config_path.open("r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+        except Exception:
+            return
+
+        if not isinstance(loaded, dict):
+            return
+
+        defaults = loaded.get("defaults", {})
+        if isinstance(defaults, dict):
+            self.prefer_local.setChecked(bool(defaults.get("preferLocal", False)))
+            self.cost_optimize.setChecked(bool(defaults.get("costOptimize", False)))
+            self.max_tokens.setValue(int(defaults.get("maxTokens", 4096)))
+            temp = float(defaults.get("temperature", 0.7))
+            self.temperature.setValue(max(0, min(100, int(temp * 100))))
+
+        logging_cfg = loaded.get("logging", {})
+        if isinstance(logging_cfg, dict):
+            level = logging_cfg.get("level", "INFO")
+            self.verbose_mode.setChecked(str(level).upper() == "DEBUG")
+
+        agent_cfg = loaded.get("agent", {})
+        if isinstance(agent_cfg, dict):
+            self.agent_enabled_default.setChecked(
+                bool(agent_cfg.get("enabledByDefault", False))
+            )
+            self.agent_default_session.setText(
+                str(agent_cfg.get("defaultSessionId", "default"))
+            )
+            self.agent_default_model.setText(
+                str(agent_cfg.get("defaultModel", "mlx-qwen3-coder-30b"))
+            )
+
+            profile = str(agent_cfg.get("profile", "balanced"))
+            profile_index = self.agent_profile.findText(profile)
+            if profile_index >= 0:
+                self.agent_profile.setCurrentIndex(profile_index)
+
+            self.agent_web_tools.setChecked(bool(agent_cfg.get("enableWebTools", True)))
+            self.agent_mcp_enabled.setChecked(bool(agent_cfg.get("enableMcp", True)))
+            self.agent_skills_enabled.setChecked(bool(agent_cfg.get("enableSkills", True)))
+            self.agent_browser_enabled.setChecked(
+                bool(agent_cfg.get("enableBrowserAutomation", False))
+            )
+
+            compatibility = agent_cfg.get("compatibility", {})
+            if isinstance(compatibility, dict):
+                skill_sources = compatibility.get(
+                    "skillSources", ["codex", "claude", "gemini"]
+                )
+                mcp_sources = compatibility.get(
+                    "mcpSources", ["codex", "claude", "gemini"]
+                )
+                all_sources = set()
+                if isinstance(skill_sources, list):
+                    all_sources.update(
+                        item for item in skill_sources if isinstance(item, str)
+                    )
+                if isinstance(mcp_sources, list):
+                    all_sources.update(
+                        item for item in mcp_sources if isinstance(item, str)
+                    )
+                self.agent_source_codex.setChecked("codex" in all_sources)
+                self.agent_source_claude.setChecked("claude" in all_sources)
+                self.agent_source_gemini.setChecked("gemini" in all_sources)
+
+            limits = agent_cfg.get("limits", {})
+            if isinstance(limits, dict):
+                self.agent_max_steps.setValue(int(limits.get("maxSteps", 10)))
+                self.agent_model_timeout.setValue(
+                    int(limits.get("modelTimeoutSeconds", 90))
+                )
+                self.agent_tool_timeout.setValue(
+                    int(limits.get("toolTimeoutSeconds", 40))
+                )
+                self.agent_shell_timeout.setValue(
+                    int(limits.get("shellTimeoutSeconds", 30))
+                )
+                self.agent_web_search_timeout.setValue(
+                    int(limits.get("webSearchTimeoutSeconds", 20))
+                )
+                self.agent_web_fetch_timeout.setValue(
+                    int(limits.get("webFetchTimeoutSeconds", 25))
+                )
+                self.agent_max_prompt_chars.setValue(
+                    int(limits.get("maxPromptChars", 24000))
+                )
+                self.agent_max_tool_output_chars.setValue(
+                    int(limits.get("maxToolOutputChars", 10000))
+                )
+                self.agent_max_shell_output_chars.setValue(
+                    int(limits.get("maxShellOutputChars", 8000))
+                )
+                self.agent_max_fetched_chars.setValue(
+                    int(limits.get("maxFetchedChars", 12000))
+                )
+                self.agent_max_web_results.setValue(
+                    int(limits.get("maxWebResults", 8))
+                )
+                self.agent_max_memory_context_chars.setValue(
+                    int(limits.get("maxMemoryContextChars", 9000))
+                )
+                self.agent_max_history_messages.setValue(
+                    int(limits.get("maxHistoryMessages", 24))
+                )
 
     def _save_settings(self) -> None:
         """Save settings and close dialog."""
+        selected_sources = []
+        if self.agent_source_codex.isChecked():
+            selected_sources.append("codex")
+        if self.agent_source_claude.isChecked():
+            selected_sources.append("claude")
+        if self.agent_source_gemini.isChecked():
+            selected_sources.append("gemini")
+        if not selected_sources:
+            selected_sources = ["codex"]
+
         settings = {
             "auto_select_model": self.auto_select_model.isChecked(),
             "prefer_local": self.prefer_local.isChecked(),
@@ -421,7 +687,92 @@ class SettingsDialog(QDialog):
             "compact_mode": self.compact_mode.isChecked(),
             "verbose_mode": self.verbose_mode.isChecked(),
             "show_tokens": self.show_tokens.isChecked(),
+            "agent_enabled_default": self.agent_enabled_default.isChecked(),
+            "agent_default_session": self.agent_default_session.text().strip()
+            or "default",
+            "agent_profile": self.agent_profile.currentText(),
+            "agent_default_model": self.agent_default_model.text().strip()
+            or "mlx-qwen3-coder-30b",
+            "agent_web_tools": self.agent_web_tools.isChecked(),
+            "agent_mcp_enabled": self.agent_mcp_enabled.isChecked(),
+            "agent_skills_enabled": self.agent_skills_enabled.isChecked(),
+            "agent_browser_enabled": self.agent_browser_enabled.isChecked(),
+            "agent_sources": selected_sources,
+            "agent_limits": {
+                "maxSteps": self.agent_max_steps.value(),
+                "modelTimeoutSeconds": self.agent_model_timeout.value(),
+                "toolTimeoutSeconds": self.agent_tool_timeout.value(),
+                "shellTimeoutSeconds": self.agent_shell_timeout.value(),
+                "webSearchTimeoutSeconds": self.agent_web_search_timeout.value(),
+                "webFetchTimeoutSeconds": self.agent_web_fetch_timeout.value(),
+                "maxPromptChars": self.agent_max_prompt_chars.value(),
+                "maxToolOutputChars": self.agent_max_tool_output_chars.value(),
+                "maxShellOutputChars": self.agent_max_shell_output_chars.value(),
+                "maxFetchedChars": self.agent_max_fetched_chars.value(),
+                "maxWebResults": self.agent_max_web_results.value(),
+                "maxMemoryContextChars": self.agent_max_memory_context_chars.value(),
+                "maxHistoryMessages": self.agent_max_history_messages.value(),
+            },
         }
+
+        config_path = CONFIG_DIR / "config.json"
+        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        loaded: dict = {}
+        if config_path.exists():
+            try:
+                with config_path.open("r", encoding="utf-8") as handle:
+                    maybe_loaded = json.load(handle)
+                if isinstance(maybe_loaded, dict):
+                    loaded = maybe_loaded
+            except Exception:
+                loaded = {}
+
+        defaults = loaded.get("defaults", {})
+        if not isinstance(defaults, dict):
+            defaults = {}
+        defaults["preferLocal"] = settings["prefer_local"]
+        defaults["costOptimize"] = settings["cost_optimize"]
+        defaults["maxTokens"] = settings["max_tokens"]
+        defaults["temperature"] = settings["temperature"]
+        loaded["defaults"] = defaults
+
+        logging_cfg = loaded.get("logging", {})
+        if not isinstance(logging_cfg, dict):
+            logging_cfg = {}
+        logging_cfg["level"] = "DEBUG" if settings["verbose_mode"] else "INFO"
+        loaded["logging"] = logging_cfg
+
+        agent_cfg = loaded.get("agent", {})
+        if not isinstance(agent_cfg, dict):
+            agent_cfg = {}
+        agent_cfg["enabledByDefault"] = settings["agent_enabled_default"]
+        agent_cfg["defaultSessionId"] = settings["agent_default_session"]
+        agent_cfg["profile"] = settings["agent_profile"]
+        agent_cfg["defaultModel"] = settings["agent_default_model"]
+        agent_cfg["enableWebTools"] = settings["agent_web_tools"]
+        agent_cfg["enableMcp"] = settings["agent_mcp_enabled"]
+        agent_cfg["enableSkills"] = settings["agent_skills_enabled"]
+        agent_cfg["enableBrowserAutomation"] = settings["agent_browser_enabled"]
+        agent_cfg["compatibility"] = {
+            "skillSources": settings["agent_sources"],
+            "mcpSources": settings["agent_sources"],
+        }
+        agent_cfg["limits"] = settings["agent_limits"]
+        loaded["agent"] = agent_cfg
+
+        if "version" not in loaded:
+            loaded["version"] = "2.0.0"
+
+        try:
+            with config_path.open("w", encoding="utf-8") as handle:
+                json.dump(loaded, handle, indent=2)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Settings Error",
+                f"Failed to save settings: {exc}",
+            )
+            return
 
         self.settingsChanged.emit(settings)
 

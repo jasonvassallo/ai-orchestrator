@@ -15,6 +15,7 @@ Or after installation:
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from typing import Any
 
 try:
@@ -40,6 +41,7 @@ except ImportError:
     sys.exit(1)
 
 
+from ..agent.runner import AgentRunner, AgentRunOptions
 from ..orchestrator import LOCAL_PROVIDERS, AgentStatus, ModelRegistry
 
 
@@ -228,6 +230,111 @@ class ExportScreen(Screen):
         self.app.pop_screen()
 
 
+class RuntimeSettingsScreen(Screen):
+    """Screen showing live effective runtime settings."""
+
+    CSS = """
+    RuntimeSettingsScreen {
+        align: center middle;
+    }
+
+    #runtime-dialog {
+        width: 100;
+        height: 36;
+        padding: 1;
+        background: $surface;
+        border: thick $primary;
+    }
+
+    #runtime-title {
+        margin-bottom: 1;
+    }
+
+    #runtime-markdown {
+        height: 1fr;
+        overflow-y: auto;
+        border: round $boost;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "close", "Close"),
+    ]
+
+    def __init__(self, snapshot_provider: Callable[[], dict[str, Any]]) -> None:
+        super().__init__()
+        self._snapshot_provider = snapshot_provider
+        self._refresh_timer: Timer | None = None
+
+    def compose(self) -> ComposeResult:
+        with Container(id="runtime-dialog"):
+            yield Static("[bold]Runtime Settings (Live)[/]", id="runtime-title")
+            yield Markdown("", id="runtime-markdown")
+            yield Button("Close", id="runtime-close", variant="primary")
+
+    def on_mount(self) -> None:
+        self._update_snapshot()
+        self._refresh_timer = self.set_interval(1.0, self._update_snapshot)
+
+    def on_unmount(self) -> None:
+        if self._refresh_timer is not None:
+            self._refresh_timer.stop()
+
+    def _format_snapshot(self, snapshot: dict[str, Any]) -> str:
+        runtime = snapshot.get("runtime", {})
+        toggles = snapshot.get("toggles", {})
+        effective = snapshot.get("effective", {})
+
+        if not isinstance(runtime, dict):
+            runtime = {}
+        if not isinstance(toggles, dict):
+            toggles = {}
+        if not isinstance(effective, dict):
+            effective = {}
+
+        lines = [
+            "## Runtime Defaults",
+            f"- max_tokens: `{runtime.get('max_tokens')}`",
+            f"- temperature: `{runtime.get('temperature')}`",
+            f"- agent_default_session: `{runtime.get('agent_default_session')}`",
+            f"- agent_default_model: `{runtime.get('agent_default_model')}`",
+            f"- agent_web_tools: `{runtime.get('agent_web_tools')}`",
+            f"- agent_mcp_enabled: `{runtime.get('agent_mcp_enabled')}`",
+            f"- agent_skills_enabled: `{runtime.get('agent_skills_enabled')}`",
+            f"- agent_browser_enabled: `{runtime.get('agent_browser_enabled')}`",
+            "",
+            "## Current Toggles",
+            f"- model: `{toggles.get('model')}`",
+            f"- think: `{toggles.get('think')}`",
+            f"- web: `{toggles.get('web')}`",
+            f"- agent: `{toggles.get('agent')}`",
+            f"- browser: `{toggles.get('browser')}`",
+            f"- image: `{toggles.get('image')}`",
+            f"- incognito: `{toggles.get('incognito')}`",
+            "",
+            "## Effective Agent Flags",
+            f"- web_tools: `{effective.get('web_tools')}`",
+            f"- mcp: `{effective.get('mcp')}`",
+            f"- skills: `{effective.get('skills')}`",
+            f"- browser_automation: `{effective.get('browser_automation')}`",
+        ]
+        return "\n".join(lines)
+
+    def _update_snapshot(self) -> None:
+        markdown = self.query_one("#runtime-markdown", Markdown)
+        snapshot = self._snapshot_provider()
+        markdown.update(self._format_snapshot(snapshot))
+
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "runtime-close":
+            self.app.pop_screen()
+
+    def action_close(self) -> None:
+        self.app.pop_screen()
+
+
 class ChatScreen(Screen):
     """Main chat screen."""
 
@@ -314,6 +421,7 @@ class ChatScreen(Screen):
         Binding("ctrl+n", "new_chat", "New Chat"),
         Binding("ctrl+e", "export_chat", "Export"),
         Binding("ctrl+k", "compact_chat", "Compact"),
+        Binding("ctrl+r", "runtime_settings", "Runtime"),
         Binding("ctrl+q", "quit", "Quit"),
         Binding("escape", "focus_input", "Focus Input"),
     ]
@@ -321,8 +429,131 @@ class ChatScreen(Screen):
     def __init__(self, orchestrator: Any = None) -> None:
         super().__init__()
         self.orchestrator = orchestrator
+        self.agent_runner = AgentRunner(orchestrator) if orchestrator else None
+        self.runtime_settings: dict[str, Any] = self._default_runtime_settings()
+        self._applying_default_toggles = False
+        self._load_runtime_settings_from_orchestrator()
         self.messages: list[tuple[str, str]] = []
         self.is_processing = False
+
+    @staticmethod
+    def _default_runtime_settings() -> dict[str, Any]:
+        return {
+            "max_tokens": 4096,
+            "temperature": 0.7,
+            "agent_enabled_default": False,
+            "agent_default_session": "tui-default",
+            "agent_default_model": "mlx-qwen3-coder-30b",
+            "agent_web_tools": True,
+            "agent_mcp_enabled": True,
+            "agent_skills_enabled": True,
+            "agent_browser_enabled": False,
+        }
+
+    @staticmethod
+    def _coerce_bool(value: Any, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        return default
+
+    @staticmethod
+    def _coerce_int(value: Any, default: int, *, minimum: int) -> int:
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, int):
+            return max(minimum, value)
+        return default
+
+    @staticmethod
+    def _coerce_float(value: Any, default: float, *, minimum: float) -> float:
+        if isinstance(value, bool):
+            return default
+        if isinstance(value, (int, float)):
+            return max(minimum, float(value))
+        return default
+
+    @staticmethod
+    def _coerce_str(value: Any, default: str) -> str:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+        return default
+
+    def _load_runtime_settings_from_orchestrator(self) -> None:
+        settings = self._default_runtime_settings()
+        if self.orchestrator is None:
+            self.runtime_settings = settings
+            return
+
+        user_config = getattr(self.orchestrator, "_user_config", {})
+        if not isinstance(user_config, dict):
+            self.runtime_settings = settings
+            return
+
+        defaults = user_config.get("defaults", {})
+        if isinstance(defaults, dict):
+            settings["max_tokens"] = self._coerce_int(
+                defaults.get("maxTokens"),
+                settings["max_tokens"],
+                minimum=100,
+            )
+            settings["temperature"] = self._coerce_float(
+                defaults.get("temperature"),
+                settings["temperature"],
+                minimum=0.0,
+            )
+
+        agent_cfg = user_config.get("agent", {})
+        if isinstance(agent_cfg, dict):
+            settings["agent_enabled_default"] = self._coerce_bool(
+                agent_cfg.get("enabledByDefault"),
+                settings["agent_enabled_default"],
+            )
+            settings["agent_default_session"] = self._coerce_str(
+                agent_cfg.get("defaultSessionId"),
+                settings["agent_default_session"],
+            )
+            settings["agent_default_model"] = self._coerce_str(
+                agent_cfg.get("defaultModel"),
+                settings["agent_default_model"],
+            )
+            settings["agent_web_tools"] = self._coerce_bool(
+                agent_cfg.get("enableWebTools"),
+                settings["agent_web_tools"],
+            )
+            settings["agent_mcp_enabled"] = self._coerce_bool(
+                agent_cfg.get("enableMcp"),
+                settings["agent_mcp_enabled"],
+            )
+            settings["agent_skills_enabled"] = self._coerce_bool(
+                agent_cfg.get("enableSkills"),
+                settings["agent_skills_enabled"],
+            )
+            settings["agent_browser_enabled"] = self._coerce_bool(
+                agent_cfg.get("enableBrowserAutomation"),
+                settings["agent_browser_enabled"],
+            )
+
+        self.runtime_settings = settings
+
+    def _apply_runtime_settings_to_controls(self) -> None:
+        model_select = self.query_one("#model-select", Select)
+        default_model = self.runtime_settings.get("agent_default_model")
+        available_models = {value for _, value in MODELS}
+        if isinstance(default_model, str) and default_model in available_models:
+            model_select.value = default_model
+
+        self._applying_default_toggles = True
+        try:
+            self.query_one("#agent-toggle", Switch).value = bool(
+                self.runtime_settings.get("agent_enabled_default", False)
+            )
+            self.query_one("#browser-toggle", Switch).value = bool(
+                self.runtime_settings.get("agent_browser_enabled", False)
+            )
+        finally:
+            self._applying_default_toggles = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -337,6 +568,7 @@ class ChatScreen(Screen):
                 "  • [bold]Ctrl+N[/] - New chat\n"
                 "  • [bold]Ctrl+E[/] - Export conversation\n"
                 "  • [bold]Ctrl+K[/] - Compact history (summarize)\n"
+                "  • [bold]Ctrl+R[/] - Runtime settings\n"
                 "  • [bold]Ctrl+Q[/] - Quit\n",
                 id="welcome",
             )
@@ -359,6 +591,14 @@ class ChatScreen(Screen):
                 yield Switch(id="web-toggle")
 
             with Horizontal(classes="toggle-container"):
+                yield Label("Agent", classes="toggle-label")
+                yield Switch(id="agent-toggle")
+
+            with Horizontal(classes="toggle-container"):
+                yield Label("Browser", classes="toggle-label")
+                yield Switch(id="browser-toggle")
+
+            with Horizontal(classes="toggle-container"):
                 yield Label("Image", classes="toggle-label")
                 yield Switch(id="image-toggle")
 
@@ -375,6 +615,7 @@ class ChatScreen(Screen):
 
     def on_mount(self) -> None:
         """Focus input on mount."""
+        self._apply_runtime_settings_to_controls()
         self.query_one("#message-input", Input).focus()
 
     def action_focus_input(self) -> None:
@@ -399,6 +640,42 @@ class ChatScreen(Screen):
             self.app.notify("No messages to export", severity="warning")
             return
         self.app.push_screen(ExportScreen(self.messages))
+
+    def _runtime_snapshot(self) -> dict[str, Any]:
+        model_select = self.query_one("#model-select", Select)
+        think_toggle = self.query_one("#think-toggle", Switch)
+        web_toggle = self.query_one("#web-toggle", Switch)
+        agent_toggle = self.query_one("#agent-toggle", Switch)
+        browser_toggle = self.query_one("#browser-toggle", Switch)
+        image_toggle = self.query_one("#image-toggle", Switch)
+        incognito_toggle = self.query_one("#incognito-toggle", Switch)
+
+        web_enabled = bool(web_toggle.value)
+        browser_enabled = bool(browser_toggle.value)
+        return {
+            "runtime": dict(self.runtime_settings),
+            "toggles": {
+                "model": model_select.value,
+                "think": bool(think_toggle.value),
+                "web": web_enabled,
+                "agent": bool(agent_toggle.value),
+                "browser": browser_enabled,
+                "image": bool(image_toggle.value),
+                "incognito": bool(incognito_toggle.value),
+            },
+            "effective": {
+                "web_tools": web_enabled
+                and bool(self.runtime_settings.get("agent_web_tools", True)),
+                "mcp": bool(self.runtime_settings.get("agent_mcp_enabled", True)),
+                "skills": bool(self.runtime_settings.get("agent_skills_enabled", True)),
+                "browser_automation": browser_enabled
+                and bool(self.runtime_settings.get("agent_browser_enabled", False)),
+            },
+        }
+
+    def action_runtime_settings(self) -> None:
+        """Show effective runtime settings."""
+        self.app.push_screen(RuntimeSettingsScreen(self._runtime_snapshot))
 
     async def action_compact_chat(self) -> None:
         """Compact conversation history into a summary."""
@@ -457,6 +734,9 @@ class ChatScreen(Screen):
 
     def on_switch_changed(self, event: Switch.Changed) -> None:
         """Handle switch toggle changes."""
+        if self._applying_default_toggles:
+            return
+
         if event.switch.id == "incognito-toggle":
             if self.orchestrator:
                 self.orchestrator.set_incognito(event.value)
@@ -464,6 +744,11 @@ class ChatScreen(Screen):
                     self.app.notify("Incognito mode enabled", severity="information")
                 else:
                     self.app.notify("Incognito mode disabled", severity="information")
+        if event.switch.id == "browser-toggle" and event.value:
+            self.app.notify(
+                "Warning: Browser automation is enabled and can interact with real websites.",
+                severity="warning",
+            )
 
     async def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle input submission."""
@@ -505,7 +790,25 @@ class ChatScreen(Screen):
 
         think_enabled = self.query_one("#think-toggle", Switch).value
         web_enabled = self.query_one("#web-toggle", Switch).value
+        agent_enabled = self.query_one("#agent-toggle", Switch).value
+        browser_enabled = self.query_one("#browser-toggle", Switch).value
         image_enabled = self.query_one("#image-toggle", Switch).value
+        max_tokens = self._coerce_int(
+            self.runtime_settings.get("max_tokens"),
+            4096,
+            minimum=100,
+        )
+        temperature = self._coerce_float(
+            self.runtime_settings.get("temperature"),
+            0.7,
+            minimum=0.0,
+        )
+        effective_web_tools = web_enabled and bool(
+            self.runtime_settings.get("agent_web_tools", True)
+        )
+        effective_browser_enabled = browser_enabled and bool(
+            self.runtime_settings.get("agent_browser_enabled", False)
+        )
 
         # Show animated status indicator
         status_widget = StatusWidget(id="loading")
@@ -531,13 +834,46 @@ class ChatScreen(Screen):
                 if image_enabled:
                     prompt = f"[Image generation requested] {prompt}"
 
-                # Query with status callback
-                response = await self.orchestrator.query(
-                    prompt,
-                    model_override=model,
-                    system_prompt=system_prompt,
-                    status_callback=on_status,
-                )
+                if agent_enabled and self.agent_runner:
+                    if browser_enabled and not effective_browser_enabled:
+                        self.app.notify(
+                            "Browser automation toggle is on, but disabled in config.",
+                            severity="warning",
+                        )
+
+                    response = await self.agent_runner.run(
+                        prompt,
+                        options=AgentRunOptions(
+                            session_id=self._coerce_str(
+                                self.runtime_settings.get("agent_default_session"),
+                                "tui-default",
+                            ),
+                            model_override=model,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            enable_web_tools=effective_web_tools,
+                            enable_mcp=bool(
+                                self.runtime_settings.get("agent_mcp_enabled", True)
+                            ),
+                            enable_skills=bool(
+                                self.runtime_settings.get("agent_skills_enabled", True)
+                            ),
+                            enable_browser_automation=effective_browser_enabled,
+                            incognito=self.query_one("#incognito-toggle", Switch).value,
+                            system_prompt=system_prompt,
+                        ),
+                        status_callback=on_status,
+                    )
+                else:
+                    # Query with status callback
+                    response = await self.orchestrator.query(
+                        prompt,
+                        model_override=model,
+                        system_prompt=system_prompt,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        status_callback=on_status,
+                    )
 
                 if response.success:
                     response_text = response.content

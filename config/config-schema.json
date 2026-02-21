@@ -224,6 +224,190 @@
         }
       }
     },
+    "agent": {
+      "type": "object",
+      "description": "Codex-like local agent runtime settings",
+      "properties": {
+        "enabledByDefault": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable agent mode by default in compatible clients"
+        },
+        "defaultModel": {
+          "type": "string",
+          "default": "mlx-qwen3-coder-30b",
+          "description": "Default model key used in agent mode"
+        },
+        "defaultSessionId": {
+          "type": "string",
+          "default": "default",
+          "description": "Default session id for persistent agent conversations"
+        },
+        "profile": {
+          "type": "string",
+          "enum": ["fast", "balanced", "deep"],
+          "default": "balanced",
+          "description": "Execution profile controlling default limits/timeouts"
+        },
+        "enableWebTools": {
+          "type": "boolean",
+          "default": true
+        },
+        "enableMcp": {
+          "type": "boolean",
+          "default": true
+        },
+        "enableSkills": {
+          "type": "boolean",
+          "default": true
+        },
+        "enableBrowserAutomation": {
+          "type": "boolean",
+          "default": false,
+          "description": "Dangerous capability: browser automation is off by default"
+        },
+        "codexHome": {
+          "type": "string",
+          "default": "~/.codex"
+        },
+        "claudeHome": {
+          "type": "string",
+          "default": "~/.claude"
+        },
+        "geminiHome": {
+          "type": "string",
+          "default": "~/.gemini"
+        },
+        "memory": {
+          "type": "object",
+          "properties": {
+            "filePath": {
+              "type": "string",
+              "default": "~/.ai_orchestrator/agent_memory.md"
+            },
+            "conversationDir": {
+              "type": "string",
+              "default": "~/.ai_orchestrator/agent_conversations"
+            },
+            "autoRememberPatterns": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "web": {
+          "type": "object",
+          "properties": {
+            "searxngBaseUrl": {
+              "type": "string",
+              "default": "http://127.0.0.1:8080"
+            },
+            "language": {
+              "type": "string",
+              "default": "en-US"
+            },
+            "userAgent": {
+              "type": "string",
+              "default": "ai-orchestrator-agent/1.0 (+local-model)"
+            }
+          }
+        },
+        "compatibility": {
+          "type": "object",
+          "properties": {
+            "skillSources": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["codex", "claude", "gemini"]
+              },
+              "default": ["codex", "claude", "gemini"]
+            },
+            "mcpSources": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": ["codex", "claude", "gemini"]
+              },
+              "default": ["codex", "claude", "gemini"]
+            }
+          }
+        },
+        "limits": {
+          "type": "object",
+          "description": "Fine-grained developer controls for timeouts and truncation",
+          "properties": {
+            "maxSteps": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 10
+            },
+            "modelTimeoutSeconds": {
+              "type": "number",
+              "minimum": 1,
+              "default": 90
+            },
+            "toolTimeoutSeconds": {
+              "type": "number",
+              "minimum": 1,
+              "default": 40
+            },
+            "shellTimeoutSeconds": {
+              "type": "number",
+              "minimum": 1,
+              "default": 30
+            },
+            "webSearchTimeoutSeconds": {
+              "type": "number",
+              "minimum": 1,
+              "default": 20
+            },
+            "webFetchTimeoutSeconds": {
+              "type": "number",
+              "minimum": 1,
+              "default": 25
+            },
+            "maxPromptChars": {
+              "type": "integer",
+              "minimum": 2000,
+              "default": 24000
+            },
+            "maxToolOutputChars": {
+              "type": "integer",
+              "minimum": 500,
+              "default": 10000
+            },
+            "maxShellOutputChars": {
+              "type": "integer",
+              "minimum": 200,
+              "default": 8000
+            },
+            "maxFetchedChars": {
+              "type": "integer",
+              "minimum": 500,
+              "default": 12000
+            },
+            "maxWebResults": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 8
+            },
+            "maxMemoryContextChars": {
+              "type": "integer",
+              "minimum": 500,
+              "default": 9000
+            },
+            "maxHistoryMessages": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 24
+            }
+          }
+        }
+      }
+    },
     "taskRouting": {
       "type": "object",
       "description": "Custom task type to model mapping",

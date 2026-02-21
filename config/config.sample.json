@@ -53,9 +53,9 @@
       "enabled": true,
       "priority": 78
     },
-    "mlx-qwen3-vl-4b": {
+    "mlx-qwen3-vl-30b": {
       "enabled": true,
-      "priority": 62
+      "priority": 70
     }
   },
   "providers": {
@@ -93,14 +93,69 @@
     "maxMessages": 100,
     "allowRemoteExecution": false
   },
+  "agent": {
+    "enabledByDefault": false,
+    "defaultModel": "mlx-qwen3-coder-30b",
+    "defaultSessionId": "default",
+    "profile": "balanced",
+    "enableWebTools": true,
+    "enableMcp": true,
+    "enableSkills": true,
+    "enableBrowserAutomation": false,
+    "codexHome": "~/.codex",
+    "claudeHome": "~/.claude",
+    "geminiHome": "~/.gemini",
+    "memory": {
+      "filePath": "~/.ai_orchestrator/agent_memory.md",
+      "conversationDir": "~/.ai_orchestrator/agent_conversations",
+      "autoRememberPatterns": [
+        "remember this",
+        "don't forget",
+        "save this",
+        "note this"
+      ]
+    },
+    "web": {
+      "searxngBaseUrl": "http://127.0.0.1:8080",
+      "language": "en-US",
+      "userAgent": "ai-orchestrator-agent/1.0 (+local-model)"
+    },
+    "compatibility": {
+      "skillSources": [
+        "codex",
+        "claude",
+        "gemini"
+      ],
+      "mcpSources": [
+        "codex",
+        "claude",
+        "gemini"
+      ]
+    },
+    "limits": {
+      "maxSteps": 10,
+      "modelTimeoutSeconds": 90,
+      "toolTimeoutSeconds": 40,
+      "shellTimeoutSeconds": 30,
+      "webSearchTimeoutSeconds": 20,
+      "webFetchTimeoutSeconds": 25,
+      "maxPromptChars": 24000,
+      "maxToolOutputChars": 10000,
+      "maxShellOutputChars": 8000,
+      "maxFetchedChars": 12000,
+      "maxWebResults": 8,
+      "maxMemoryContextChars": 9000,
+      "maxHistoryMessages": 24
+    }
+  },
   "taskRouting": {
     "general": [
-      "mlx-qwen3-4b",
+      "mlx-ministral-14b-reasoning",
       "vertex-gemini-3-flash",
       "vertex-gemini-3-pro"
     ],
     "code": [
-      "mlx-qwen2.5-coder-14b",
+      "mlx-qwen3-coder-30b",
       "kimi-k2-thinking",
       "vertex-gemini-3-pro"
     ],
@@ -136,9 +191,7 @@
     ],
     "local": [
       "mlx-qwen3-coder-30b",
-      "mlx-qwen3-4b",
-      "mlx-qwen2.5-coder-14b",
-      "mlx-qwen3-vl-4b",
+      "mlx-qwen3-vl-30b",
       "mlx-llama-vision-11b",
       "mlx-ministral-14b-reasoning"
     ]

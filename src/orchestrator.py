@@ -2151,7 +2151,7 @@ class MLXProvider(BaseProvider):
     def __init__(
         self,
         rate_limiter: RateLimiter,
-        model_path: str = "mlx-community/Qwen3-4B-Instruct-2507-4bit",
+        model_path: str = "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit",
         is_vision_model: bool = False,
         status_callback: StatusCallback | None = None,
         status_model_name: str | None = None,
@@ -3889,38 +3889,15 @@ class ModelRegistry:
             supports_vision=True,
             supports_streaming=True,
         ),
-        "mlx-qwen3-4b": ModelCapability(
-            name="MLX Qwen3 4B",
+        "mlx-qwen3-vl-30b": ModelCapability(
+            name="MLX Qwen3 VL 30B",
             provider="mlx",
-            model_id="mlx-community/Qwen3-4B-Instruct-2507-4bit",
-            task_types=(
-                TaskType.GENERAL_NLP,
-                TaskType.LOCAL_MODEL,
-                TaskType.CODE_GENERATION,
-            ),
-            context_window=32768,
-            cost_per_1k_input=0,
-            cost_per_1k_output=0,
-            strengths=(
-                "daily use",
-                "coding",
-                "fast",
-                "local",
-                "private",
-                "efficient",
-            ),
-            best_for=("fast coding", "daily use", "local coding"),
-            max_output_tokens=2048,
-            supports_streaming=True,
-        ),
-        "mlx-qwen3-vl-4b": ModelCapability(
-            name="MLX Qwen3 VL 4B",
-            provider="mlx",
-            model_id="mlx-community/Qwen3-VL-4B-Instruct-8bit",
+            model_id="mlx-community/Qwen3-VL-30B-A3B-Instruct-4bit",
             task_types=(
                 TaskType.MULTIMODAL,
                 TaskType.LOCAL_MODEL,
                 TaskType.GENERAL_NLP,
+                TaskType.REASONING,
                 TaskType.SUMMARIZATION,
             ),
             context_window=32768,
@@ -3930,12 +3907,12 @@ class ModelRegistry:
                 "vision",
                 "image understanding",
                 "captioning",
-                "8-bit precision",
-                "fast",
+                "multimodal reasoning",
+                "30B A3B 4-bit",
                 "local",
                 "private",
             ),
-            best_for=("image analysis", "captioning", "multimodal local tasks"),
+            best_for=("image analysis", "detailed captioning", "multimodal local tasks"),
             max_output_tokens=2048,
             supports_vision=True,
             supports_streaming=True,
@@ -3961,30 +3938,6 @@ class ModelRegistry:
                 "private",
             ),
             best_for=("large codebases", "agentic coding", "complex debugging"),
-            max_output_tokens=2048,
-            supports_streaming=True,
-        ),
-        "mlx-qwen2.5-coder-14b": ModelCapability(
-            name="MLX Qwen 2.5 Coder 14B",
-            provider="mlx",
-            model_id="mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
-            task_types=(
-                TaskType.CODE_GENERATION,
-                TaskType.REASONING,
-                TaskType.LOCAL_MODEL,
-                TaskType.GENERAL_NLP,
-            ),
-            context_window=32768,
-            cost_per_1k_input=0,
-            cost_per_1k_output=0,
-            strengths=(
-                "complex coding",
-                "debugging",
-                "refactoring",
-                "local",
-                "private",
-            ),
-            best_for=("light coding", "medium coding", "debugging"),
             max_output_tokens=2048,
             supports_streaming=True,
         ),
@@ -4457,7 +4410,7 @@ Routing Rules:
    - "complex": architecture design, mathematical proofs, nuanced creative writing -> Use Reasoning/High-IQ models.
 
 2. MODEL SELECTION (subscription + capability tags):
-   - Simple/Local -> "mlx-qwen3-4b" (general) or "mlx-qwen2.5-coder-14b" (code)
+   - Simple/Local -> "mlx-ministral-14b-reasoning" (general) or "mlx-qwen3-coder-30b" (code)
    - Standard -> "vertex-gemini-3-flash" (subscription)
    - Advanced math/logic/coding -> "kimi-k2-thinking" (fallback: "vertex-gemini-3-pro")
    - Advanced long-context/general -> "vertex-gemini-3-pro"
@@ -4562,14 +4515,12 @@ Routing Rules:
             return "general"
 
         def _pick_local_simple(task_label: str) -> list[str]:
-            if (
-                TaskType.MULTIMODAL in task_set
-                and "mlx-llama-vision-11b" in ModelRegistry.MODELS
-            ):
-                return ["mlx-llama-vision-11b"]
-            if task_label == "code" and "mlx-qwen2.5-coder-14b" in ModelRegistry.MODELS:
-                return ["mlx-qwen2.5-coder-14b"]
-            for key in ("mlx-qwen3-4b", "mlx-ministral-14b-reasoning"):
+            for key in ("mlx-qwen3-vl-30b", "mlx-llama-vision-11b"):
+                if TaskType.MULTIMODAL in task_set and key in ModelRegistry.MODELS:
+                    return [key]
+            if task_label == "code" and "mlx-qwen3-coder-30b" in ModelRegistry.MODELS:
+                return ["mlx-qwen3-coder-30b"]
+            for key in ("mlx-ministral-14b-reasoning", "mlx-qwen3-coder-30b"):
                 if key in ModelRegistry.MODELS:
                     return [key]
             return []
@@ -6528,6 +6479,36 @@ async def main() -> None:
         action="store_true",
         help="Incognito mode: don't save or use conversation history",
     )
+    parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="Use Codex-like local agent mode with tools/MCP/skills",
+    )
+    parser.add_argument(
+        "--session",
+        default="default",
+        help="Agent session id for persistent memory/conversation",
+    )
+    parser.add_argument(
+        "--browser-automation",
+        action="store_true",
+        help="Enable dangerous browser automation tools in agent mode",
+    )
+    parser.add_argument(
+        "--disable-agent-web-tools",
+        action="store_true",
+        help="Disable web_search/web_fetch tools in agent mode",
+    )
+    parser.add_argument(
+        "--disable-agent-mcp",
+        action="store_true",
+        help="Disable MCP tool discovery in agent mode",
+    )
+    parser.add_argument(
+        "--disable-agent-skills",
+        action="store_true",
+        help="Disable skills discovery in agent mode",
+    )
 
     args = parser.parse_args()
 
@@ -6604,14 +6585,40 @@ async def main() -> None:
     # Execute query with animated status
     with console.status("[cyan]Initializing...", spinner="dots") as status:
         status_handle = status
-        query_kwargs: dict[str, Any] = {
-            "prompt": args.prompt,
-            "model_override": args.model,
-            "status_callback": on_status,
-        }
-        if args.max_tokens is not None:
-            query_kwargs["max_tokens"] = args.max_tokens
-        response = await orchestrator.query(**query_kwargs)
+        if args.agent:
+            from .agent.runner import AgentRunner, AgentRunOptions
+
+            if args.browser_automation:
+                console.print(
+                    "[bold red]Warning:[/] browser automation is enabled and may "
+                    "perform real interactions on live websites."
+                )
+
+            runner = AgentRunner(orchestrator)
+            response = await runner.run(
+                args.prompt,
+                options=AgentRunOptions(
+                    session_id=args.session,
+                    model_override=args.model,
+                    max_tokens=args.max_tokens if args.max_tokens is not None else 2048,
+                    temperature=0.2,
+                    enable_web_tools=not args.disable_agent_web_tools,
+                    enable_mcp=not args.disable_agent_mcp,
+                    enable_skills=not args.disable_agent_skills,
+                    enable_browser_automation=args.browser_automation,
+                    incognito=args.incognito,
+                ),
+                status_callback=on_status,
+            )
+        else:
+            query_kwargs: dict[str, Any] = {
+                "prompt": args.prompt,
+                "model_override": args.model,
+                "status_callback": on_status,
+            }
+            if args.max_tokens is not None:
+                query_kwargs["max_tokens"] = args.max_tokens
+            response = await orchestrator.query(**query_kwargs)
 
     if response.success:
         console.print(

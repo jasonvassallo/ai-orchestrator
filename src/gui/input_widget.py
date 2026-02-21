@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMessageBox,
     QPushButton,
     QSlider,
     QTextEdit,
@@ -365,6 +366,11 @@ class InputWidget(QFrame):
         # Feature toggles
         self.think_toggle = ToggleButton("Think", "Enable extended thinking mode")
         self.web_toggle = ToggleButton("Web", "Enable web search")
+        self.agent_toggle = ToggleButton("Agent", "Enable Codex-like local agent mode")
+        self.browser_toggle = ToggleButton(
+            "Browser",
+            "Enable dangerous browser automation for agent mode",
+        )
         self.research_toggle = ToggleButton("Research", "Enable deep research mode")
         self.image_toggle = ToggleButton("Image", "Generate images")
         self.music_toggle = ToggleButton("Music", "Generate music")
@@ -374,6 +380,8 @@ class InputWidget(QFrame):
 
         top_row.addWidget(self.think_toggle)
         top_row.addWidget(self.web_toggle)
+        top_row.addWidget(self.agent_toggle)
+        top_row.addWidget(self.browser_toggle)
         top_row.addWidget(self.research_toggle)
         top_row.addWidget(self.image_toggle)
         top_row.addWidget(self.music_toggle)
@@ -381,6 +389,7 @@ class InputWidget(QFrame):
 
         # Music toggle opens dialog
         self.music_toggle.clicked.connect(self._on_music_toggle)
+        self.browser_toggle.toggled.connect(self._on_browser_toggle)
 
         top_row.addStretch()
         layout.addLayout(top_row)
@@ -438,6 +447,23 @@ class InputWidget(QFrame):
         else:
             self._music_params = None
 
+    def _on_browser_toggle(self, enabled: bool) -> None:
+        """Warn users before enabling browser automation."""
+        if not enabled:
+            return
+        result = QMessageBox.warning(
+            self,
+            "Enable Browser Automation",
+            (
+                "Browser automation can execute real web actions (clicks, form submissions, "
+                "navigation) on live sites.\n\nDo you want to enable it?"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if result != QMessageBox.StandardButton.Yes:
+            self.browser_toggle.setChecked(False)
+
     def _send_message(self) -> None:
         """Send the current message."""
         text = self.text_input.toPlainText().strip()
@@ -451,6 +477,8 @@ class InputWidget(QFrame):
             "model": model_id,
             "thinking": self.think_toggle.isChecked(),
             "web_search": self.web_toggle.isChecked(),
+            "agent_mode": self.agent_toggle.isChecked(),
+            "browser_automation": self.browser_toggle.isChecked(),
             "deep_research": self.research_toggle.isChecked(),
             "image_generation": self.image_toggle.isChecked(),
             "music_generation": self._music_params
@@ -461,6 +489,29 @@ class InputWidget(QFrame):
 
         self.text_input.clear()
         self.messageSent.emit(text, settings)
+
+    def set_model_by_id(self, model_id: str | None) -> None:
+        """Set selected model by registry key."""
+        if model_id is None:
+            self.model_combo.setCurrentIndex(0)
+            return
+
+        index = self.model_combo.findData(model_id)
+        if index >= 0:
+            self.model_combo.setCurrentIndex(index)
+
+    def apply_agent_defaults(
+        self,
+        *,
+        enabled: bool,
+        browser_automation: bool,
+    ) -> None:
+        """Apply default agent toggle states without warnings."""
+        self.agent_toggle.setChecked(enabled)
+
+        previous_blocked = self.browser_toggle.blockSignals(True)
+        self.browser_toggle.setChecked(browser_automation)
+        self.browser_toggle.blockSignals(previous_blocked)
 
     def set_enabled(self, enabled: bool) -> None:
         """Enable or disable input."""

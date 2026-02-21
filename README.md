@@ -24,6 +24,8 @@ AI Orchestrator automatically routes your queries to the best AI model based on 
 - **Local Models**: Privacy-first option with MLX on Apple Silicon
 - **Cost Optimization**: Route to cheaper models when appropriate
 - **Web Search**: Perplexity integration for real-time information
+- **Local Agent Mode**: Codex-like local agent loop with tools, memory file, and optional browser automation
+- **MCP & Skills Interop**: Imports MCP servers and skill/context docs from Codex, Claude, and Gemini installations
 - **Image Generation**: DALL-E integration for creating images
 - **Music Generation**: Create MIDI and audio files with AI (separate drums/bass/chords tracks, 90s tech-house patterns)
 - **Animated Status**: Real-time processing indicators across all UIs (validating, routing, generating, etc.)
@@ -92,11 +94,24 @@ export GOOGLE_CLOUD_LOCATION="global"  # or a region like us-central1
 # CLI usage
 uv run python -m src.orchestrator "Explain quantum computing"
 
+# Codex-like local agent mode (tools + memory + MCP/skills import)
+uv run python -m src.orchestrator "Refactor this module and run tests" --agent --local
+# or
+ai-agent "Search latest release notes and summarize with sources"
+
+# Bootstrap local SearxNG for agent web tools (includes health check)
+ai-searx-bootstrap
+# Optional standalone health check
+ai-searx-health
+
 # With model override
 uv run python -m src.orchestrator "Debug this Python code" --model claude-sonnet-4.5
 
 # Prefer local models (MLX)
 uv run python -m src.orchestrator "Summarize this text" --local
+
+# Agent mode with browser automation (explicitly dangerous)
+uv run python -m src.orchestrator "Open site and capture screenshots" --agent --browser-automation
 
 # Cost optimization mode
 uv run python -m src.orchestrator "Write a haiku" --cheap
@@ -164,7 +179,7 @@ python -m src.manage_models --yes
 python -m src.manage_models --yes --no-clean
 ```
 
-It includes MLX Qwen3 4B (4-bit), MLX Qwen3 Coder 30B (4-bit), MLX Qwen3 VL 4B (8-bit), MLX Qwen 2.5 Coder 14B (4-bit), MLX Llama 3.2 11B Vision (4-bit), MLX Ministral 14B Reasoning (6-bit), plus MusicGen. If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
+It includes MLX Qwen3 Coder 30B (4-bit), MLX Qwen3 VL 30B (4-bit), MLX Llama 3.2 11B Vision (4-bit), MLX Ministral 14B Reasoning (6-bit), plus MusicGen (small, stereo-medium, large). If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
 
 ## Mac Applications
 
@@ -207,6 +222,7 @@ Beautiful terminal-based interface:
 - Modern, stylish design
 - Keyboard-driven
 - Works over SSH
+- Runtime settings panel (`Ctrl+R`) to inspect effective agent/session/tool limits live
 
 ```bash
 # Run the terminal UI
@@ -322,10 +338,8 @@ uv run python setup_app.py py2app
 | Model | Provider | Best For | Strengths |
 |-------|----------|----------|-----------|
 | `mlx-llama-vision-11b` | MLX | Apple Silicon, Vision | Vision, documents, charts, writing, 128K context (4-bit) |
-| `mlx-qwen3-4b` | MLX | Apple Silicon, Daily/Coding | Fast, efficient, local, private (4-bit) |
 | `mlx-qwen3-coder-30b` | MLX | Apple Silicon, Large/Complex Coding | Agentic coding, long context, local (4-bit default) |
-| `mlx-qwen3-vl-4b` | MLX | Apple Silicon, Vision + Chat | Vision understanding, captioning, local (8-bit default) |
-| `mlx-qwen2.5-coder-14b` | MLX | Apple Silicon, Coding | Strong coding, debugging, refactoring, local (4-bit) |
+| `mlx-qwen3-vl-30b` | MLX | Apple Silicon, Vision + Chat | Vision understanding, multimodal reasoning, local (4-bit default) |
 | `mlx-ministral-14b-reasoning` | MLX | Apple Silicon, Deep Thinking | Reasoning, math, STEM, local (6-bit) |
 
 ### Smart Routing Configuration
@@ -516,8 +530,8 @@ Copy `config/config.sample.json` to `~/.ai_orchestrator/config.json`:
     "gemini-2.0-flash": { "enabled": false }
   },
   "taskRouting": {
-    "general": ["mlx-qwen3-4b", "vertex-gemini-3-flash", "vertex-gemini-3-pro"],
-    "code": ["mlx-qwen2.5-coder-14b", "kimi-k2-thinking", "vertex-gemini-3-pro"],
+    "general": ["mlx-ministral-14b-reasoning", "vertex-gemini-3-flash", "vertex-gemini-3-pro"],
+    "code": ["mlx-qwen3-coder-30b", "kimi-k2-thinking", "vertex-gemini-3-pro"],
     "reasoning": ["kimi-k2-thinking", "vertex-gemini-3-pro"],
     "websearch": ["perplexity-sonar-pro", "perplexity-sonar-reasoning-pro"],
     "long-context": ["vertex-gemini-3-pro"]

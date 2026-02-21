@@ -36,6 +36,7 @@ classifiers = [
 
 dependencies = [
     "httpx>=0.25.0",
+    "tomli>=2.0.1; python_version < '3.11'",
 ]
 
 [project.optional-dependencies]
@@ -92,6 +93,9 @@ dev = [
 
 [project.scripts]
 ai-orchestrator = "src.orchestrator:main"
+ai-agent = "src.agent.cli:main"
+ai-searx-bootstrap = "src.agent.searx:bootstrap_main"
+ai-searx-health = "src.agent.searx:health_main"
 ai-configure = "src.credentials:configure_credentials_interactive"
 ai-app = "src.gui.app:main"
 ai-chat = "src.tui.app:main"

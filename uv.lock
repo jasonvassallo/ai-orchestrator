@@ -17,6 +17,7 @@ version = "2.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.optional-dependencies]
@@ -125,6 +126,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "rumps", marker = "extra == 'menubar'", specifier = ">=0.4.0" },
     { name = "textual", marker = "extra == 'tui'", specifier = ">=0.47.0" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0.1" },
     { name = "transformers", marker = "extra == 'mlx'", specifier = ">=5.1.0,<6.0" },
 ]
 provides-extras = ["openai", "anthropic", "google", "cohere", "secure", "gui", "tui", "menubar", "mlx", "ui", "all", "dev"]

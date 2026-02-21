@@ -30,13 +30,13 @@ logger = logging.getLogger(__name__)
 
 # Local models that require disk space
 LOCAL_MODELS = {
-    "MLX Qwen3 4B": "mlx-community/Qwen3-4B-Instruct-2507-4bit",
     "MLX Qwen3 Coder 30B": "mlx-community/Qwen3-Coder-30B-A3B-Instruct-4bit",
-    "MLX Qwen3 VL 4B (8-bit)": "mlx-community/Qwen3-VL-4B-Instruct-8bit",
-    "MLX Qwen 2.5 Coder 14B": "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",
+    "MLX Qwen3 VL 30B (4-bit)": "mlx-community/Qwen3-VL-30B-A3B-Instruct-4bit",
     "MLX Llama 3.2 11B Vision": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
     "MLX Ministral 14B Reasoning": "mlx-community/Ministral-3-14B-Reasoning-2512-6bit",
     "MusicGen Small": "facebook/musicgen-small",
+    "MusicGen Stereo Medium": "facebook/musicgen-stereo-medium",
+    "MusicGen Large": "facebook/musicgen-large",
 }
 
 DOWNLOAD_RETRIES = 3
@@ -181,7 +181,13 @@ def ensure_model_installed(auto_yes: bool) -> None:
     print("\n🔍 Checking Local Models:")
 
     def _find_snapshot_with_weights(repo_id: str) -> Path | None:
-        weight_files = ("model.safetensors", "model.safetensors.index.json")
+        weight_files = (
+            "model.safetensors",
+            "model.safetensors.index.json",
+            "pytorch_model.bin",
+            "pytorch_model.bin.index.json",
+            "state_dict.bin",
+        )
         for filename in weight_files:
             cached = try_to_load_from_cache(repo_id=repo_id, filename=filename)
             if cached:
@@ -199,7 +205,13 @@ def ensure_model_installed(auto_yes: bool) -> None:
             for snap in snapshots:
                 if list(snap.glob("*.safetensors")):
                     return snap
+                if list(snap.glob("pytorch_model*.bin")):
+                    return snap
+                if list(snap.glob("state_dict.bin")):
+                    return snap
                 if (snap / "model.safetensors.index.json").exists():
+                    return snap
+                if (snap / "pytorch_model.bin.index.json").exists():
                     return snap
 
         return None
@@ -329,7 +341,7 @@ def main() -> None:
                 pass
 
     print("\n✨ Done! You can now run the orchestrator with:")
-    print("   python -m src.orchestrator 'Hello' --model mlx-qwen3-4b")
+    print("   python -m src.orchestrator 'Hello' --model mlx-qwen3-coder-30b")
 
 
 if __name__ == "__main__":
