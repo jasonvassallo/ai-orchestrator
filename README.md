@@ -179,7 +179,7 @@ python -m src.manage_models --yes
 python -m src.manage_models --yes --no-clean
 ```
 
-It includes MLX Qwen3 Coder 30B (4-bit), MLX Qwen3 VL 30B (4-bit), MLX Llama 3.2 11B Vision (4-bit), MLX Ministral 14B Reasoning (6-bit), plus MusicGen (small, stereo-medium, large). If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
+It includes MLX Qwen3 Coder 30B (4-bit), MLX Qwen3 VL 30B (4-bit), MLX Llama 3.2 11B Vision (4-bit), MLX Ministral 14B Reasoning (6-bit), plus all supported MusicGen variants (`small`, `medium`, `large`, stereo, melody, stereo-melody, and `style`). If `hf-transfer` is installed, downloads will use it automatically. For targeted removals, use `hf cache rm <repo_id>`.
 
 ## Mac Applications
 
@@ -456,7 +456,7 @@ In the GUI app, click the **Music** toggle and configure:
 - Genre/style
 - Energy level
 - Duration
-- **AI Model** (MusicGen variant: small/medium/large, stereo, melody)
+- **AI Model** (all supported MusicGen variants, including stereo/melody/style)
 
 You can also use the built-in CLI:
 
@@ -467,6 +467,21 @@ uv run python -m src.orchestrator \
   --music-model musicgen-small \
   --music-duration 5
 ```
+
+MusicGen model keys currently available:
+- `musicgen-small`
+- `musicgen-medium`
+- `musicgen-large`
+- `musicgen-stereo-small`
+- `musicgen-stereo-medium`
+- `musicgen-stereo-large`
+- `musicgen-melody`
+- `musicgen-melody-large`
+- `musicgen-stereo-melody`
+- `musicgen-stereo-melody-large`
+- `musicgen-style`
+
+When a selected MusicGen model is missing locally, AI Orchestrator now downloads it on demand and shows download progress before generation starts.
 
 Generated files are saved to `~/Music/AI Orchestrator/` and can be opened in:
 - Logic Pro

@@ -35,8 +35,16 @@ LOCAL_MODELS = {
     "MLX Llama 3.2 11B Vision": "mlx-community/Llama-3.2-11B-Vision-Instruct-4bit",
     "MLX Ministral 14B Reasoning": "mlx-community/Ministral-3-14B-Reasoning-2512-6bit",
     "MusicGen Small": "facebook/musicgen-small",
-    "MusicGen Stereo Medium": "facebook/musicgen-stereo-medium",
+    "MusicGen Medium": "facebook/musicgen-medium",
     "MusicGen Large": "facebook/musicgen-large",
+    "MusicGen Stereo Small": "facebook/musicgen-stereo-small",
+    "MusicGen Stereo Medium": "facebook/musicgen-stereo-medium",
+    "MusicGen Stereo Large": "facebook/musicgen-stereo-large",
+    "MusicGen Melody": "facebook/musicgen-melody",
+    "MusicGen Melody Large": "facebook/musicgen-melody-large",
+    "MusicGen Stereo Melody": "facebook/musicgen-stereo-melody",
+    "MusicGen Stereo Melody Large": "facebook/musicgen-stereo-melody-large",
+    "MusicGen Style": "facebook/musicgen-style",
 }
 
 DOWNLOAD_RETRIES = 3

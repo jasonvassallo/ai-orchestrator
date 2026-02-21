@@ -16,6 +16,9 @@ MusicGen offers several model variants with different capabilities:
 | `musicgen-stereo-large` | 3.3B | Stereo output, highest quality |
 | `musicgen-melody` | 1.5B | Can condition on a reference melody |
 | `musicgen-melody-large` | 3.3B | Melody-conditioned, highest quality |
+| `musicgen-stereo-melody` | 1.5B | Stereo + melody-conditioned |
+| `musicgen-stereo-melody-large` | 3.3B | Stereo + melody-conditioned, highest quality |
+| `musicgen-style` | N/A | Style-conditioned generation (experimental) |
 
 **Note:** Larger models require more VRAM and take longer to generate, but produce higher quality audio. The stereo models output stereo audio instead of mono.
 
@@ -76,6 +79,6 @@ If successful, it prints the output path and writes `/tmp/musicgen_test.wav`.
 - Model/version incompatibility errors:
   - Confirm `.music-venv` has `transformers>=5.1,<6.0` and `huggingface-hub>=1.4,<2.0`.
 - Model downloads are slow:
-  - First run will download model weights to your HF cache. Re-uses cache afterward.
+  - First run will download model weights to your HF cache. The app now triggers `hf download` with a progress/status bar when a selected model is missing, then re-uses cache afterward.
 - Use a single HF cache:
   - `export HF_HOME="$HOME/Library/Caches/huggingface"`

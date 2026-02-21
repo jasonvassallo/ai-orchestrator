@@ -228,6 +228,27 @@ MUSICGEN_MODELS = {
         "stereo": False,
         "melody": True,
     },
+    "musicgen-stereo-melody": {
+        "id": "facebook/musicgen-stereo-melody",
+        "revision": "022c3bd20a7d77e7c014082f0391bcbcd3940a7a",
+        "description": "Stereo + melody-conditioned, 1.5B params",
+        "stereo": True,
+        "melody": True,
+    },
+    "musicgen-stereo-melody-large": {
+        "id": "facebook/musicgen-stereo-melody-large",
+        "revision": "eea14861e6c29c47aea1055982a217468cd1634d",
+        "description": "Stereo + melody-conditioned, 3.3B params",
+        "stereo": True,
+        "melody": True,
+    },
+    "musicgen-style": {
+        "id": "facebook/musicgen-style",
+        "revision": "bd0bbe32a093ef751414cf2dd7a9a7e4fef16e96",
+        "description": "Style-conditioned generation (experimental)",
+        "stereo": False,
+        "melody": False,
+    },
 }
 
 
@@ -647,6 +668,7 @@ async def generate_audio_with_musicgen(
 
                 # Get the selected MusicGen model ID
                 model_id = get_musicgen_model_id(params.musicgen_model)
+                revision = get_musicgen_model_revision(params.musicgen_model)
 
                 cmd = [
                     str(py),
@@ -659,14 +681,22 @@ async def generate_audio_with_musicgen(
                     str(output_path),
                     "--model",
                     model_id,
+                    "--revision",
+                    revision,
                 ]
+                logger.info(
+                    "MusicGen model selected: %s (%s).",
+                    params.musicgen_model,
+                    model_id,
+                )
+                logger.info(
+                    "If the model is not cached, download progress is shown below."
+                )
                 res = subprocess.run(  # noqa: S603
-                    cmd, capture_output=True, text=True, check=False
+                    cmd, check=False
                 )  # nosec B603
-                if res.returncode == 0:
-                    path_str = res.stdout.strip().splitlines()[-1]
-                    if Path(path_str).exists():
-                        return path_str
+                if res.returncode == 0 and output_path.exists():
+                    return str(output_path)
     except Exception as exc:
         logger.debug("MusicGen script invocation failed.", exc_info=exc)
     # 1) Try Audiocraft (preferred)

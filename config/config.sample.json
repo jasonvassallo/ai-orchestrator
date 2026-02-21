@@ -207,7 +207,10 @@
       "musicgen-stereo-medium",
       "musicgen-stereo-large",
       "musicgen-melody",
-      "musicgen-melody-large"
+      "musicgen-melody-large",
+      "musicgen-stereo-melody",
+      "musicgen-stereo-melody-large",
+      "musicgen-style"
     ]
   }
 }
