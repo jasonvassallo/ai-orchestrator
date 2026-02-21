@@ -619,7 +619,7 @@ uv run ruff check src
 uv run ruff format --check .
 
 # Security scans
-uv run bandit -q -r src scripts
+uv run bandit --ini .bandit -r -q
 uv run pip-audit
 ```
 

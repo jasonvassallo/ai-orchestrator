@@ -1,0 +1,4 @@
+[bandit]
+# Keep security scanning focused on production/runtime code.
+targets = src,scripts
+exclude = tests
