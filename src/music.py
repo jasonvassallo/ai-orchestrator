@@ -5,7 +5,9 @@ Music Generation Module
 Generates audio and MIDI files using AI models and music theory.
 Supports:
 - MIDI generation with separate tracks (drums, bass, chords)
-- MusicGen for AI audio generation
+- MusicGen via MLX (Apple Silicon native, preferred)
+- MusicGen via PyTorch (audiocraft / transformers fallback)
+- Stable Audio via MLX (requires mlx-audiogen server)
 - 90s tech-house and progressive house patterns
 """
 
@@ -627,17 +629,164 @@ def create_combined_midi(params: MusicParameters, filename_base: str) -> str:
     return str(output_path)
 
 
+# ---------------------------------------------------------------------------
+# MLX Audio Generation Backend
+# ---------------------------------------------------------------------------
+
+# MLX server address (mlx-audiogen-server)
+MLX_SERVER_HOST = os.environ.get("MLX_SERVER_HOST", "127.0.0.1")
+MLX_SERVER_PORT = int(os.environ.get("MLX_SERVER_PORT", "8420"))
+
+
+async def _generate_via_mlx_server(
+    prompt: str,
+    duration: int,
+    output_path: Path,
+    model_type: str = "musicgen",
+    **kwargs: Any,
+) -> str | None:
+    """Generate audio via the mlx-audiogen HTTP server.
+
+    Sends a POST request to the local MLX server, polls for completion,
+    and downloads the resulting WAV file.
+
+    Args:
+        prompt: Text description of desired audio.
+        duration: Duration in seconds.
+        output_path: Where to save the WAV file.
+        model_type: 'musicgen' or 'stable_audio'.
+        **kwargs: Additional generation parameters (temperature, seed, etc.)
+
+    Returns:
+        Path to the generated WAV file, or None if server unavailable.
+    """
+    import json
+    import urllib.request
+    import urllib.error
+
+    base_url = f"http://{MLX_SERVER_HOST}:{MLX_SERVER_PORT}"
+
+    # Check if server is reachable
+    try:
+        req = urllib.request.Request(  # nosec B310 — localhost only
+            f"{base_url}/api/models", method="GET"
+        )
+        with urllib.request.urlopen(req, timeout=2) as resp:  # nosec B310
+            if resp.status != 200:
+                return None
+    except (urllib.error.URLError, TimeoutError, OSError):
+        logger.debug("MLX server not reachable at %s", base_url)
+        return None
+
+    # Submit generation request
+    body = {
+        "model": model_type,
+        "prompt": prompt,
+        "seconds": float(min(duration, 300)),
+    }
+    # Pass through optional params
+    for key in ("temperature", "top_k", "guidance_coef", "steps",
+                "cfg_scale", "seed", "melody_path", "style_audio_path",
+                "style_coef"):
+        if key in kwargs and kwargs[key] is not None:
+            body[key] = kwargs[key]
+
+    try:
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(  # nosec B310
+            f"{base_url}/api/generate",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
+            result = json.loads(resp.read())
+        job_id = result["id"]
+        logger.info("MLX generation submitted: job %s", job_id)
+    except Exception as exc:
+        logger.debug("MLX generation submit failed: %s", exc)
+        return None
+
+    # Poll for completion (up to 10 minutes)
+    import asyncio
+
+    max_polls = 1200  # 10 minutes at 500ms intervals
+    for _ in range(max_polls):
+        await asyncio.sleep(0.5)
+        try:
+            req = urllib.request.Request(  # nosec B310
+                f"{base_url}/api/status/{job_id}", method="GET"
+            )
+            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
+                status = json.loads(resp.read())
+
+            if status["status"] == "done":
+                # Download the WAV
+                req = urllib.request.Request(  # nosec B310
+                    f"{base_url}/api/audio/{job_id}", method="GET"
+                )
+                with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
+                    with open(output_path, "wb") as f:
+                        f.write(resp.read())
+                logger.info("MLX audio saved to %s", output_path)
+                return str(output_path)
+
+            if status["status"] == "error":
+                logger.warning("MLX generation error: %s", status.get("error"))
+                return None
+        except Exception as exc:
+            logger.debug("MLX status poll error: %s", exc)
+            return None
+
+    logger.warning("MLX generation timed out for job %s", job_id)
+    return None
+
+
 async def generate_audio_with_musicgen(
     params: MusicParameters, filename_base: str
 ) -> str | None:
-    """Generate audio using MusicGen in a dedicated venv if available.
+    """Generate audio using MusicGen (or Stable Audio) backends.
 
-    Order:
+    Cascade order:
+      0) MLX server (mlx-audiogen-server on localhost:8420, Apple Silicon native)
       1) External venv runner (.music-venv) calling scripts/musicgen_generate.py
-      2) Audiocraft (best in-process fallback)
-      3) Transformers (in-process fallback)
+      2) Audiocraft (best in-process PyTorch fallback)
+      3) Transformers (in-process PyTorch fallback)
     """
-    # 0) Try dedicated audio venv runner
+    # Build prompt
+    prompt_parts = []
+    if params.prompt:
+        prompt_parts.append(params.prompt)
+    prompt_parts.append(f"{params.bpm} BPM")
+    prompt_parts.append(f"{params.key} {params.scale}")
+    genre_descriptions = {
+        "tech_house_90s": "90s tech house, funky beats, underground electronic",
+        "funky_90s": "funky house, groovy bassline, 90s electronic",
+        "progressive_house": "progressive house, atmospheric, building",
+        "deep_house": "deep house, soulful, smooth",
+        "minimal": "minimal techno, hypnotic, stripped back",
+    }
+    prompt_parts.append(
+        genre_descriptions.get(params.genre, "electronic dance music")
+    )
+    prompt = ", ".join(prompt_parts)
+
+    output_path = get_output_dir() / f"{filename_base}_audio.wav"
+
+    # 0) Try MLX server (fastest on Apple Silicon, no PyTorch needed)
+    try:
+        mlx_result = await _generate_via_mlx_server(
+            prompt=prompt,
+            duration=max(1, min(params.duration, 30)),
+            output_path=output_path,
+            model_type="musicgen",
+        )
+        if mlx_result:
+            return mlx_result
+    except Exception as exc:
+        logger.debug("MLX server generation failed: %s", exc)
+
+    # 1) Try dedicated audio venv runner
     try:
         project_root = _find_project_root()
         if project_root:
@@ -985,8 +1134,24 @@ def format_music_result(result: dict) -> str:
 
 def get_capabilities() -> dict[str, bool]:
     """Get available music generation capabilities."""
+    # Check if MLX server is reachable
+    mlx_available = False
+    try:
+        import urllib.request
+
+        base_url = f"http://{MLX_SERVER_HOST}:{MLX_SERVER_PORT}"
+        req = urllib.request.Request(  # nosec B310 — localhost only
+            f"{base_url}/api/models", method="GET"
+        )
+        with urllib.request.urlopen(req, timeout=1) as resp:  # nosec B310
+            mlx_available = resp.status == 200
+    except Exception:
+        pass
+
     return {
         "midi": MIDI_AVAILABLE,
-        "audio": TORCH_AVAILABLE,
-        "musicgen": TORCH_AVAILABLE,
+        "audio": TORCH_AVAILABLE or mlx_available,
+        "musicgen": TORCH_AVAILABLE or mlx_available,
+        "mlx": mlx_available,
+        "stable_audio": mlx_available,
     }
