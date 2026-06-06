@@ -671,6 +671,8 @@ async def _generate_via_mlx_server(
         req = urllib.request.Request(  # nosec B310 — localhost only
             f"{base_url}/api/models", method="GET"
         )
+        # base_url is the hardcoded http:// localhost MLX server (no file://).
+        # nosemgrep
         with urllib.request.urlopen(req, timeout=2) as resp:  # nosec B310
             if resp.status != 200:
                 return None
@@ -699,6 +701,8 @@ async def _generate_via_mlx_server(
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        # base_url is the hardcoded http:// localhost MLX server (no file://).
+        # nosemgrep
         with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
             result = json.loads(resp.read())
         job_id = result["id"]
@@ -717,6 +721,8 @@ async def _generate_via_mlx_server(
             req = urllib.request.Request(  # nosec B310
                 f"{base_url}/api/status/{job_id}", method="GET"
             )
+            # base_url is the hardcoded http:// localhost MLX server (no file://).
+            # nosemgrep
             with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
                 status = json.loads(resp.read())
 
@@ -725,6 +731,8 @@ async def _generate_via_mlx_server(
                 req = urllib.request.Request(  # nosec B310
                     f"{base_url}/api/audio/{job_id}", method="GET"
                 )
+                # base_url is the hardcoded http:// localhost MLX server (no file://).
+                # nosemgrep
                 with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
                     with open(output_path, "wb") as f:
                         f.write(resp.read())
@@ -1143,6 +1151,8 @@ def get_capabilities() -> dict[str, bool]:
         req = urllib.request.Request(  # nosec B310 — localhost only
             f"{base_url}/api/models", method="GET"
         )
+        # base_url is the hardcoded http:// localhost MLX server (no file://).
+        # nosemgrep
         with urllib.request.urlopen(req, timeout=1) as resp:  # nosec B310
             mlx_available = resp.status == 200
     except Exception:

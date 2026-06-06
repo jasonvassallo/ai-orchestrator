@@ -803,10 +803,35 @@ class MlxProvider {
         return this._stringifyContent(systemMessage.content);
     }
 
+    _validatePythonExecutable(exe) {
+        // Defense in depth: pythonExecutable can originate from the
+        // ai-orchestrator.pythonExecutable workspace setting, which a malicious
+        // .vscode/settings.json in an untrusted folder could point at an
+        // arbitrary binary. Require the basename to be a real Python
+        // interpreter (python, python3, python3.12, python.exe, ...) so spawn()
+        // can never launch something else. PATH/relative resolution is
+        // unchanged for legitimate values; fail closed on anything else.
+        const base = path.basename(String(exe)).toLowerCase();
+        if (!/^python(\d+(\.\d+)?)?(\.exe)?$/.test(base)) {
+            throw new Error(
+                `Refusing to launch MLX runtime: "${exe}" is not a recognized ` +
+                `Python interpreter. Set "ai-orchestrator.pythonExecutable" to a ` +
+                `python or python3 binary.`
+            );
+        }
+        return exe;
+    }
+
     _runBridge(pythonExecutable, projectPath, payload) {
+        const safePython = this._validatePythonExecutable(pythonExecutable);
         return new Promise((resolve, reject) => {
+            // safePython is validated by _validatePythonExecutable() to a
+            // python/python3 interpreter basename, and the args are a fixed
+            // array (no shell), so an attacker-set pythonExecutable cannot
+            // launch an arbitrary binary or inject a command.
             const child = spawn(
-                pythonExecutable,
+                // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
+                safePython,
                 ['-c', MLX_BRIDGE_SCRIPT],
                 {
                     cwd: projectPath,
