@@ -633,9 +633,21 @@ def create_combined_midi(params: MusicParameters, filename_base: str) -> str:
 # MLX Audio Generation Backend
 # ---------------------------------------------------------------------------
 
-# MLX server address (mlx-audiogen-server)
+# MLX server address (mlx-audiogen-server). This integration targets a local
+# mlx-audiogen server; the host is configurable but constrained to loopback.
 MLX_SERVER_HOST = os.environ.get("MLX_SERVER_HOST", "127.0.0.1")
 MLX_SERVER_PORT = int(os.environ.get("MLX_SERVER_PORT", "8420"))
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return True only for loopback hosts.
+
+    MLX_SERVER_HOST is operator-configurable via the environment. We refuse to
+    issue requests to a non-loopback host so the MLX integration cannot be
+    turned into an SSRF primitive (and so the urllib suppressions below hold
+    their loopback-only invariant).
+    """
+    return host.strip().lower() in {"127.0.0.1", "localhost", "::1"}
 
 
 async def _generate_via_mlx_server(
@@ -664,15 +676,22 @@ async def _generate_via_mlx_server(
     import urllib.request
     import urllib.error
 
+    if not _is_loopback_host(MLX_SERVER_HOST):
+        logger.warning(
+            "Refusing MLX server request to non-loopback host %r; "
+            "set MLX_SERVER_HOST to a loopback address.",
+            MLX_SERVER_HOST,
+        )
+        return None
     base_url = f"http://{MLX_SERVER_HOST}:{MLX_SERVER_PORT}"
 
     # Check if server is reachable
     try:
-        req = urllib.request.Request(  # nosec B310 — localhost only
+        req = urllib.request.Request(  # nosec B310 — loopback only
             f"{base_url}/api/models", method="GET"
         )
-        # base_url is the hardcoded http:// localhost MLX server (no file://).
-        # nosemgrep
+        # base_url host is enforced loopback (guard above) + fixed http:// scheme.
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         with urllib.request.urlopen(req, timeout=2) as resp:  # nosec B310
             if resp.status != 200:
                 return None
@@ -701,8 +720,8 @@ async def _generate_via_mlx_server(
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        # base_url is the hardcoded http:// localhost MLX server (no file://).
-        # nosemgrep
+        # base_url host is enforced loopback (guard above) + fixed http:// scheme.
+        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
         with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
             result = json.loads(resp.read())
         job_id = result["id"]
@@ -721,8 +740,8 @@ async def _generate_via_mlx_server(
             req = urllib.request.Request(  # nosec B310
                 f"{base_url}/api/status/{job_id}", method="GET"
             )
-            # base_url is the hardcoded http:// localhost MLX server (no file://).
-            # nosemgrep
+            # base_url host is enforced loopback (guard above) + fixed http:// scheme.
+            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
             with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
                 status = json.loads(resp.read())
 
@@ -731,8 +750,8 @@ async def _generate_via_mlx_server(
                 req = urllib.request.Request(  # nosec B310
                     f"{base_url}/api/audio/{job_id}", method="GET"
                 )
-                # base_url is the hardcoded http:// localhost MLX server (no file://).
-                # nosemgrep
+                # base_url host is enforced loopback (guard above) + fixed http:// scheme.
+                # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
                 with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
                     with open(output_path, "wb") as f:
                         f.write(resp.read())
@@ -1147,14 +1166,15 @@ def get_capabilities() -> dict[str, bool]:
     try:
         import urllib.request
 
-        base_url = f"http://{MLX_SERVER_HOST}:{MLX_SERVER_PORT}"
-        req = urllib.request.Request(  # nosec B310 — localhost only
-            f"{base_url}/api/models", method="GET"
-        )
-        # base_url is the hardcoded http:// localhost MLX server (no file://).
-        # nosemgrep
-        with urllib.request.urlopen(req, timeout=1) as resp:  # nosec B310
-            mlx_available = resp.status == 200
+        if _is_loopback_host(MLX_SERVER_HOST):
+            base_url = f"http://{MLX_SERVER_HOST}:{MLX_SERVER_PORT}"
+            req = urllib.request.Request(  # nosec B310 — loopback only
+                f"{base_url}/api/models", method="GET"
+            )
+            # base_url host is enforced loopback (guard above) + fixed http:// scheme.
+            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+            with urllib.request.urlopen(req, timeout=1) as resp:  # nosec B310
+                mlx_available = resp.status == 200
     except Exception:
         pass
 

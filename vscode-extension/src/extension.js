@@ -730,7 +730,17 @@ class MlxProvider {
 
     _resolveRuntimeConfig() {
         const config = vscode.workspace.getConfiguration('ai-orchestrator');
-        const configuredPython = (config.get('pythonExecutable', '') || '').trim();
+        // Security: only honor the Python executable from USER (global) settings,
+        // never from workspace- or folder-scoped settings. Otherwise a malicious
+        // .vscode/settings.json in an untrusted folder could point this at an
+        // arbitrary binary (even one named "python" at an attacker path, which a
+        // basename check alone would not catch) that _runBridge() then spawns.
+        // Project-specific interpreters are still picked up via the auto-detected
+        // .venv below; the global setting is controlled by the user, not the repo.
+        const inspectedPython = config.inspect('pythonExecutable');
+        const configuredPython = ((inspectedPython && inspectedPython.globalValue) || '')
+            .toString()
+            .trim();
 
         let projectPath = (config.get('pythonProjectPath', '') || '').trim();
         if (!projectPath) {
