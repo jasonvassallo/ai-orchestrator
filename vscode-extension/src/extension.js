@@ -833,12 +833,27 @@ class MlxProvider {
     }
 
     _runBridge(pythonExecutable, projectPath, payload) {
+        // Workspace Trust gate: the interpreter (auto-detected .venv) and the
+        // working directory are both derived from the opened workspace, so an
+        // untrusted folder could ship a malicious .venv/bin/python or a cwd that
+        // shadows stdlib modules for `python -c`. Refuse to spawn anything in an
+        // untrusted workspace — this closes the workspace-controlled-binary and
+        // cwd-import vectors that a basename check alone cannot.
+        if (!vscode.workspace.isTrusted) {
+            return Promise.reject(
+                new Error(
+                    'Local MLX runtime is disabled in untrusted workspaces. Run '
+                    + '"Workspaces: Manage Workspace Trust" and trust this folder '
+                    + 'to enable it.'
+                )
+            );
+        }
         const safePython = this._validatePythonExecutable(pythonExecutable);
         return new Promise((resolve, reject) => {
-            // safePython is validated by _validatePythonExecutable() to a
-            // python/python3 interpreter basename, and the args are a fixed
-            // array (no shell), so an attacker-set pythonExecutable cannot
-            // launch an arbitrary binary or inject a command.
+            // Reached only in a trusted workspace (gated above). safePython is
+            // validated to a python/python3 interpreter basename and the args
+            // are a fixed array (no shell), so an attacker-set pythonExecutable
+            // cannot launch an arbitrary binary or inject a command.
             const child = spawn(
                 // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
                 safePython,

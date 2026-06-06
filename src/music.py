@@ -13,9 +13,11 @@ Supports:
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import random
+import socket
 import subprocess  # nosec B404
 from dataclasses import dataclass
 from datetime import datetime
@@ -640,14 +642,34 @@ MLX_SERVER_PORT = int(os.environ.get("MLX_SERVER_PORT", "8420"))
 
 
 def _is_loopback_host(host: str) -> bool:
-    """Return True only for loopback hosts.
+    """Return True only for hosts that resolve entirely to loopback addresses.
 
     MLX_SERVER_HOST is operator-configurable via the environment. We refuse to
     issue requests to a non-loopback host so the MLX integration cannot be
     turned into an SSRF primitive (and so the urllib suppressions below hold
-    their loopback-only invariant).
+    their loopback-only invariant). Rather than a literal string match, resolve
+    the host and require EVERY resolved address to be loopback — so a name like
+    "localhost" is accepted only if it actually points at 127.0.0.0/8 or ::1,
+    and any name resolving (even partly) off loopback is rejected. Resolution
+    failures are treated as non-loopback (fail closed).
     """
-    return host.strip().lower() in {"127.0.0.1", "localhost", "::1"}
+    normalized = host.strip().lower()
+    if normalized in {"127.0.0.1", "localhost", "::1"}:
+        return True
+    try:
+        infos = socket.getaddrinfo(normalized, None)
+    except (socket.gaierror, UnicodeError, ValueError):
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        sockaddr = info[4]
+        try:
+            if not ipaddress.ip_address(sockaddr[0]).is_loopback:
+                return False
+        except ValueError:
+            return False
+    return True
 
 
 async def _generate_via_mlx_server(
