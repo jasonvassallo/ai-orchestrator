@@ -666,6 +666,8 @@ def _resolve_loopback_ip(host: str) -> str | None:
         infos = socket.getaddrinfo(normalized, None)
     except (socket.gaierror, UnicodeError, ValueError):
         return None
+    if not infos:
+        return None
     pinned: str | None = None
     for info in infos:
         addr = info[4][0]
@@ -680,7 +682,11 @@ def _resolve_loopback_ip(host: str) -> str | None:
 
 
 def _is_loopback_host(host: str) -> bool:
-    """True if *host* resolves entirely to loopback (see _resolve_loopback_ip)."""
+    """True if *host* resolves entirely to loopback (see _resolve_loopback_ip).
+
+    Thin boolean wrapper kept for readability and direct unit testing; the
+    request paths use _resolve_loopback_ip()/_MLX_LOOPBACK_IP for the pinned IP.
+    """
     return _resolve_loopback_ip(host) is not None
 
 
@@ -765,13 +771,15 @@ async def _generate_via_mlx_server(
         return None
 
     # Check if server is reachable. Blocking I/O runs in a worker thread so it
-    # never blocks the async event loop.
+    # never blocks the async event loop. (urllib raises HTTPError for non-2xx
+    # and URLError for connection failures; both subclass OSError, so a bad
+    # status surfaces through the except branch rather than the status check.)
     try:
         status_code, _ = await asyncio.to_thread(_mlx_request, "/api/models", 2.0)
         if status_code != 200:
             return None
     except (TimeoutError, OSError):
-        logger.debug("MLX server not reachable at %s", _mlx_base_url())
+        logger.debug("MLX server not reachable (host=%s)", MLX_SERVER_HOST)
         return None
 
     # Submit generation request
@@ -1231,8 +1239,8 @@ def get_capabilities() -> dict[str, bool]:
         try:
             status_code, _ = _mlx_request("/api/models", 1.0)
             mlx_available = status_code == 200
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("MLX capability probe failed: %s", exc)
 
     return {
         "midi": MIDI_AVAILABLE,

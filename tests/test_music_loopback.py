@@ -7,6 +7,8 @@ IP literals or a mocked resolver, so no real DNS/network access is required.
 
 from unittest import mock
 
+import pytest
+
 import src.music as music
 
 
@@ -59,6 +61,7 @@ class TestResolveLoopbackIp:
 
     def test_literal_ip_returned_as_is(self) -> None:
         assert music._resolve_loopback_ip("127.0.0.1") == "127.0.0.1"
+        # The whole 127.0.0.0/8 block is loopback (RFC 1122), not just .1.
         assert music._resolve_loopback_ip("127.0.0.9") == "127.0.0.9"
         assert music._resolve_loopback_ip("::1") == "::1"
 
@@ -94,9 +97,61 @@ class TestResolveLoopbackIp:
 class TestMlxBaseUrl:
     """base_url is built from the pinned IP, with IPv6 bracketing."""
 
-    def test_default_is_pinned_ipv4(self) -> None:
+    def test_default_is_pinned_ipv4(self, monkeypatch) -> None:
+        # Pin the import-time constant so the assertion is deterministic
+        # regardless of how the runner resolves loopback.
+        monkeypatch.setattr(music, "_MLX_LOOPBACK_IP", "127.0.0.1")
         assert music._mlx_base_url() == f"http://127.0.0.1:{music.MLX_SERVER_PORT}"
 
     def test_ipv6_is_bracketed(self, monkeypatch) -> None:
         monkeypatch.setattr(music, "_MLX_LOOPBACK_IP", "::1")
         assert music._mlx_base_url() == f"http://[::1]:{music.MLX_SERVER_PORT}"
+
+
+class TestMlxRequest:
+    """The centralized blocking HTTP helper (loopback-pinned, nosem'd)."""
+
+    def test_returns_status_and_body(self, monkeypatch) -> None:
+        import urllib.request
+
+        monkeypatch.setattr(music, "_MLX_LOOPBACK_IP", "127.0.0.1")
+        resp = mock.MagicMock()
+        resp.status = 200
+        resp.read.return_value = b"hello"
+        ctx = mock.MagicMock()
+        ctx.__enter__.return_value = resp
+        with mock.patch.object(urllib.request, "urlopen", return_value=ctx) as uo:
+            status, body = music._mlx_request("/api/models", 1.0)
+        assert status == 200
+        assert body == b"hello"
+        # Connects to the pinned loopback base URL, never a re-resolved name.
+        sent_req = uo.call_args.args[0]
+        assert sent_req.full_url == f"{music._mlx_base_url()}/api/models"
+
+    def test_urlerror_propagates_as_oserror(self) -> None:
+        import urllib.error
+        import urllib.request
+
+        with mock.patch.object(
+            urllib.request, "urlopen", side_effect=urllib.error.URLError("boom")
+        ):
+            with pytest.raises(OSError):
+                music._mlx_request("/api/models", 1.0)
+
+
+class TestGetCapabilities:
+    """The sync capability probe uses _mlx_request directly (no to_thread)."""
+
+    def test_mlx_available_true_on_200(self, monkeypatch) -> None:
+        monkeypatch.setattr(music, "_MLX_HOST_IS_LOOPBACK", True)
+        monkeypatch.setattr(music, "_mlx_request", lambda path, timeout: (200, b""))
+        assert music.get_capabilities()["mlx"] is True
+
+    def test_mlx_unavailable_on_exception(self, monkeypatch) -> None:
+        monkeypatch.setattr(music, "_MLX_HOST_IS_LOOPBACK", True)
+
+        def _boom(path, timeout):
+            raise OSError("connection refused")
+
+        monkeypatch.setattr(music, "_mlx_request", _boom)
+        assert music.get_capabilities()["mlx"] is False
