@@ -741,6 +741,15 @@ class MlxProvider {
         const configuredPython = ((inspectedPython && inspectedPython.globalValue) || '')
             .toString()
             .trim();
+        // Surface (don't honor) a workspace/folder-scoped override so the user
+        // isn't confused when their repo-level setting is intentionally ignored.
+        if (inspectedPython
+            && (inspectedPython.workspaceValue || inspectedPython.workspaceFolderValue)) {
+            console.warn(
+                '[ai-orchestrator] Ignoring workspace-scoped "pythonExecutable" for '
+                + 'security; set it in your User (global) settings to take effect.'
+            );
+        }
 
         let projectPath = (config.get('pythonProjectPath', '') || '').trim();
         if (!projectPath) {
@@ -822,7 +831,7 @@ class MlxProvider {
         // can never launch something else. PATH/relative resolution is
         // unchanged for legitimate values; fail closed on anything else.
         const base = path.basename(String(exe)).toLowerCase();
-        if (!/^python(\d+(\.\d+)?)?(\.exe)?$/.test(base)) {
+        if (!/^python(\d+(\.\d+)*)?(\.exe)?$/.test(base)) {
             throw new Error(
                 `Refusing to launch MLX runtime: "${exe}" is not a recognized ` +
                 `Python interpreter. Set "ai-orchestrator.pythonExecutable" to a ` +
@@ -876,14 +885,14 @@ class MlxProvider {
             });
 
             child.on('error', (err) => {
-                reject(new Error(`Failed to start local MLX runtime (${pythonExecutable}): ${err.message}`));
+                reject(new Error(`Failed to start local MLX runtime (${safePython}): ${err.message}`));
             });
 
             child.on('close', (code) => {
                 if (code !== 0) {
                     reject(
                         new Error(
-                            `Local MLX runtime failed (exit ${code}) using "${pythonExecutable}". ${stderr.trim() || 'No stderr output.'}`
+                            `Local MLX runtime failed (exit ${code}) using "${safePython}". ${stderr.trim() || 'No stderr output.'}`
                         )
                     );
                     return;

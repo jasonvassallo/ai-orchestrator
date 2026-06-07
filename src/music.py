@@ -647,10 +647,10 @@ def _is_loopback_host(host: str) -> bool:
     MLX_SERVER_HOST is operator-configurable via the environment. We refuse to
     issue requests to a non-loopback host so the MLX integration cannot be
     turned into an SSRF primitive (and so the urllib suppressions below hold
-    their loopback-only invariant). Rather than a literal string match, resolve
-    the host and require EVERY resolved address to be loopback — so a name like
-    "localhost" is accepted only if it actually points at 127.0.0.0/8 or ::1,
-    and any name resolving (even partly) off loopback is rejected. Resolution
+    their loopback-only invariant). The three canonical literals (127.0.0.1,
+    localhost, ::1) are accepted directly; any other name is resolved and
+    accepted only if EVERY resolved address is loopback (127.0.0.0/8 or ::1),
+    so a name resolving even partly off loopback is rejected. Resolution
     failures are treated as non-loopback (fail closed).
     """
     normalized = host.strip().lower()
@@ -670,6 +670,11 @@ def _is_loopback_host(host: str) -> bool:
         except ValueError:
             return False
     return True
+
+
+# Resolved once at import (MLX_SERVER_HOST is a module-level env constant) so the
+# request paths never call the blocking getaddrinfo() inside the async event loop.
+_MLX_HOST_IS_LOOPBACK: bool = _is_loopback_host(MLX_SERVER_HOST)
 
 
 async def _generate_via_mlx_server(
@@ -698,7 +703,7 @@ async def _generate_via_mlx_server(
     import urllib.request
     import urllib.error
 
-    if not _is_loopback_host(MLX_SERVER_HOST):
+    if not _MLX_HOST_IS_LOOPBACK:
         logger.warning(
             "Refusing MLX server request to non-loopback host %r; "
             "set MLX_SERVER_HOST to a loopback address.",
@@ -1188,7 +1193,7 @@ def get_capabilities() -> dict[str, bool]:
     try:
         import urllib.request
 
-        if _is_loopback_host(MLX_SERVER_HOST):
+        if _MLX_HOST_IS_LOOPBACK:
             base_url = f"http://{MLX_SERVER_HOST}:{MLX_SERVER_PORT}"
             req = urllib.request.Request(  # nosec B310 — loopback only
                 f"{base_url}/api/models", method="GET"

@@ -1242,7 +1242,7 @@ class VertexAIProvider(BaseProvider):
                     # The format string mentions "credentials" but the args are
                     # only a file path and the exception — no secret value is
                     # logged, so this is not a credential disclosure.
-                    # nosemgrep
+                    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
                     logger.warning(
                         "Failed to load credentials from %s; falling back to ADC: %s",
                         credentials_path,
