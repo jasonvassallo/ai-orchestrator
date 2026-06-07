@@ -1239,6 +1239,10 @@ class VertexAIProvider(BaseProvider):
                         self.project_id = project
                     logger.info(f"Loaded Vertex AI credentials from {credentials_path}")
                 except Exception as e:
+                    # The format string mentions "credentials" but the args are
+                    # only a file path and the exception — no secret value is
+                    # logged, so this is not a credential disclosure.
+                    # nosemgrep: python.lang.security.audit.logging.logger-credential-leak.python-logger-credential-disclosure
                     logger.warning(
                         "Failed to load credentials from %s; falling back to ADC: %s",
                         credentials_path,

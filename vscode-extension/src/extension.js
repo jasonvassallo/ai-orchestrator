@@ -723,6 +723,9 @@ async def run() -> None:
 asyncio.run(run())
 `;
 
+// Show the "workspace pythonExecutable ignored" notice at most once per session.
+let warnedWorkspacePythonOverride = false;
+
 class MlxProvider {
     constructor() {
         this.name = 'mlx';
@@ -730,7 +733,31 @@ class MlxProvider {
 
     _resolveRuntimeConfig() {
         const config = vscode.workspace.getConfiguration('ai-orchestrator');
-        const configuredPython = (config.get('pythonExecutable', '') || '').trim();
+        // Security: only honor the Python executable from USER (global) settings,
+        // never from workspace- or folder-scoped settings. Otherwise a malicious
+        // .vscode/settings.json in an untrusted folder could point this at an
+        // arbitrary binary (even one named "python" at an attacker path, which a
+        // basename check alone would not catch) that _runBridge() then spawns.
+        // Project-specific interpreters are still picked up via the auto-detected
+        // .venv below; the global setting is controlled by the user, not the repo.
+        const inspectedPython = config.inspect('pythonExecutable');
+        const configuredPython = ((inspectedPython && inspectedPython.globalValue) || '')
+            .toString()
+            .trim();
+        // Surface (don't honor) a workspace/folder-scoped override so the user
+        // isn't confused when their repo-level setting is intentionally ignored.
+        // Use a visible toast, but only once per session to avoid spamming on
+        // every generation.
+        if (inspectedPython
+            && (inspectedPython.workspaceValue || inspectedPython.workspaceFolderValue)
+            && !warnedWorkspacePythonOverride) {
+            warnedWorkspacePythonOverride = true;
+            vscode.window.showWarningMessage(
+                'ai-orchestrator: a workspace-scoped "pythonExecutable" setting is '
+                + 'ignored for security. Set it in your User (global) settings to '
+                + 'take effect.'
+            );
+        }
 
         let projectPath = (config.get('pythonProjectPath', '') || '').trim();
         if (!projectPath) {
@@ -803,10 +830,50 @@ class MlxProvider {
         return this._stringifyContent(systemMessage.content);
     }
 
+    _validatePythonExecutable(exe) {
+        // Defense in depth: pythonExecutable can originate from the
+        // ai-orchestrator.pythonExecutable workspace setting, which a malicious
+        // .vscode/settings.json in an untrusted folder could point at an
+        // arbitrary binary. Require the basename to be a real Python
+        // interpreter (python, python3, python3.12, python.exe, ...) so spawn()
+        // can never launch something else. PATH/relative resolution is
+        // unchanged for legitimate values; fail closed on anything else.
+        const base = path.basename(String(exe)).toLowerCase();
+        if (!/^python(\d+(\.\d+)*)?(\.exe)?$/.test(base)) {
+            throw new Error(
+                `Refusing to launch MLX runtime: "${exe}" is not a recognized ` +
+                `Python interpreter. Set "ai-orchestrator.pythonExecutable" to a ` +
+                `python or python3 binary.`
+            );
+        }
+        return exe;
+    }
+
     _runBridge(pythonExecutable, projectPath, payload) {
+        // Workspace Trust gate: the interpreter (auto-detected .venv) and the
+        // working directory are both derived from the opened workspace, so an
+        // untrusted folder could ship a malicious .venv/bin/python or a cwd that
+        // shadows stdlib modules for `python -c`. Refuse to spawn anything in an
+        // untrusted workspace — this closes the workspace-controlled-binary and
+        // cwd-import vectors that a basename check alone cannot.
+        if (!vscode.workspace.isTrusted) {
+            return Promise.reject(
+                new Error(
+                    'Local MLX runtime is disabled in untrusted workspaces. Run '
+                    + '"Workspaces: Manage Workspace Trust" and trust this folder '
+                    + 'to enable it.'
+                )
+            );
+        }
+        const safePython = this._validatePythonExecutable(pythonExecutable);
         return new Promise((resolve, reject) => {
+            // Reached only in a trusted workspace (gated above). safePython is
+            // validated to a python/python3 interpreter basename and the args
+            // are a fixed array (no shell), so an attacker-set pythonExecutable
+            // cannot launch an arbitrary binary or inject a command.
             const child = spawn(
-                pythonExecutable,
+                // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process
+                safePython,
                 ['-c', MLX_BRIDGE_SCRIPT],
                 {
                     cwd: projectPath,
@@ -826,14 +893,14 @@ class MlxProvider {
             });
 
             child.on('error', (err) => {
-                reject(new Error(`Failed to start local MLX runtime (${pythonExecutable}): ${err.message}`));
+                reject(new Error(`Failed to start local MLX runtime (${safePython}): ${err.message}`));
             });
 
             child.on('close', (code) => {
                 if (code !== 0) {
                     reject(
                         new Error(
-                            `Local MLX runtime failed (exit ${code}) using "${pythonExecutable}". ${stderr.trim() || 'No stderr output.'}`
+                            `Local MLX runtime failed (exit ${code}) using "${safePython}". ${stderr.trim() || 'No stderr output.'}`
                         )
                     );
                     return;
