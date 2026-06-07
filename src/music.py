@@ -701,8 +701,19 @@ _MLX_HOST_IS_LOOPBACK: bool = _MLX_LOOPBACK_IP is not None
 
 
 def _mlx_base_url() -> str:
-    """Base URL for the MLX server, built from the pinned loopback IP."""
-    host = _MLX_LOOPBACK_IP or "127.0.0.1"
+    """Base URL for the MLX server, built from the pinned loopback IP.
+
+    Callers must guard on ``_MLX_HOST_IS_LOOPBACK`` first. Rather than silently
+    falling back to 127.0.0.1 when no loopback IP was pinned (a latent footgun
+    if a future caller forgets the guard), fail fast — a raise (not an assert,
+    which ``python -O`` strips) keeps the loopback-only invariant explicit.
+    """
+    if _MLX_LOOPBACK_IP is None:
+        raise RuntimeError(
+            "_mlx_base_url() called without a pinned loopback IP; "
+            "MLX_SERVER_HOST is not a loopback address."
+        )
+    host = _MLX_LOOPBACK_IP
     if ":" in host:  # IPv6 literal needs brackets in a URL
         host = f"[{host}]"
     return f"http://{host}:{MLX_SERVER_PORT}"

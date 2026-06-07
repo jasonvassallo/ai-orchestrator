@@ -107,6 +107,13 @@ class TestMlxBaseUrl:
         monkeypatch.setattr(music, "_MLX_LOOPBACK_IP", "::1")
         assert music._mlx_base_url() == f"http://[::1]:{music.MLX_SERVER_PORT}"
 
+    def test_raises_without_pinned_ip(self, monkeypatch) -> None:
+        # Fail fast instead of silently targeting 127.0.0.1 if the loopback
+        # guard is ever bypassed.
+        monkeypatch.setattr(music, "_MLX_LOOPBACK_IP", None)
+        with pytest.raises(RuntimeError):
+            music._mlx_base_url()
+
 
 class TestMlxRequest:
     """The centralized blocking HTTP helper (loopback-pinned, nosem'd)."""
@@ -136,6 +143,20 @@ class TestMlxRequest:
             urllib.request, "urlopen", side_effect=urllib.error.URLError("boom")
         ):
             with pytest.raises(OSError):
+                music._mlx_request("/api/models", 1.0)
+
+    def test_http_error_propagates(self) -> None:
+        # urllib raises HTTPError (an OSError subclass) for non-2xx responses,
+        # so a 5xx surfaces as an exception, not a (status, body) tuple — the
+        # caller's `except OSError` handles it.
+        import urllib.error
+        import urllib.request
+
+        err = urllib.error.HTTPError(
+            "http://127.0.0.1/api/models", 503, "Service Unavailable", {}, None
+        )
+        with mock.patch.object(urllib.request, "urlopen", side_effect=err):
+            with pytest.raises(urllib.error.HTTPError):
                 music._mlx_request("/api/models", 1.0)
 
 
