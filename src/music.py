@@ -641,48 +641,94 @@ MLX_SERVER_HOST = os.environ.get("MLX_SERVER_HOST", "127.0.0.1")
 MLX_SERVER_PORT = int(os.environ.get("MLX_SERVER_PORT", "8420"))
 
 
-def _is_loopback_host(host: str) -> bool:
-    """Return True only for hosts that resolve entirely to loopback addresses.
+def _resolve_loopback_ip(host: str) -> str | None:
+    """Resolve *host* to a numeric loopback IP to connect to, or None.
 
     MLX_SERVER_HOST is operator-configurable via the environment. We refuse to
     issue requests to a non-loopback host so the MLX integration cannot be
-    turned into an SSRF primitive (and so the urllib suppressions below hold
-    their loopback-only invariant). The three canonical literals (127.0.0.1,
-    localhost, ::1) are accepted directly; any other name is resolved and
-    accepted only if EVERY resolved address is loopback (127.0.0.0/8 or ::1),
-    so a name resolving even partly off loopback is rejected. Resolution
-    failures are treated as non-loopback (fail closed).
+    turned into an SSRF primitive. A literal loopback IP (127.0.0.0/8 or ::1) is
+    returned as-is; any other name is resolved and accepted only if EVERY
+    resolved address is loopback, in which case the numeric address is returned
+    so callers connect to that PINNED IP instead of re-resolving the name on
+    each request (which would reopen a DNS-rebinding hole). Resolution failures,
+    empty results, or any non-loopback address yield None (fail closed).
     """
     normalized = host.strip().lower()
-    if normalized in {"127.0.0.1", "localhost", "::1"}:
-        return True
-    # If it's already an IP literal, decide without a DNS syscall.
+    # Pin the conventional loopback literal without any DNS lookup.
+    if normalized == "localhost":
+        return "127.0.0.1"
+    # Bare IP literal: decide without a DNS syscall.
     try:
-        return ipaddress.ip_address(normalized).is_loopback
+        return normalized if ipaddress.ip_address(normalized).is_loopback else None
     except ValueError:
         pass  # not a bare IP — resolve the hostname below
     try:
         infos = socket.getaddrinfo(normalized, None)
     except (socket.gaierror, UnicodeError, ValueError):
-        return False
-    if not infos:
-        return False
+        return None
+    pinned: str | None = None
     for info in infos:
-        sockaddr = info[4]
+        addr = info[4][0]
         try:
-            if not ipaddress.ip_address(sockaddr[0]).is_loopback:
-                return False
+            if not ipaddress.ip_address(addr).is_loopback:
+                return None
         except ValueError:
-            return False
-    return True
+            return None
+        if pinned is None:
+            pinned = addr
+    return pinned
+
+
+def _is_loopback_host(host: str) -> bool:
+    """True if *host* resolves entirely to loopback (see _resolve_loopback_ip)."""
+    return _resolve_loopback_ip(host) is not None
 
 
 # Resolved once at import (MLX_SERVER_HOST is a module-level env constant) so the
-# request paths never call the blocking getaddrinfo() inside the async event loop.
-# Because this is fixed at import, tests exercise other hosts by calling
-# _is_loopback_host() directly (and mocking socket.getaddrinfo), not by setting
-# MLX_SERVER_HOST afterwards.
-_MLX_HOST_IS_LOOPBACK: bool = _is_loopback_host(MLX_SERVER_HOST)
+# request paths never call the blocking getaddrinfo() inside the async event loop
+# AND always connect to the pinned numeric IP (no per-request re-resolution, so a
+# rebinding-prone hostname cannot leave loopback after import). Because this is
+# fixed at import, tests exercise other hosts by calling _resolve_loopback_ip()
+# directly (and mocking socket.getaddrinfo), not by setting MLX_SERVER_HOST after.
+_MLX_LOOPBACK_IP: str | None = _resolve_loopback_ip(MLX_SERVER_HOST)
+_MLX_HOST_IS_LOOPBACK: bool = _MLX_LOOPBACK_IP is not None
+
+
+def _mlx_base_url() -> str:
+    """Base URL for the MLX server, built from the pinned loopback IP."""
+    host = _MLX_LOOPBACK_IP or "127.0.0.1"
+    if ":" in host:  # IPv6 literal needs brackets in a URL
+        host = f"[{host}]"
+    return f"http://{host}:{MLX_SERVER_PORT}"
+
+
+def _mlx_request(
+    path: str,
+    timeout: float,
+    *,
+    data: bytes | None = None,
+    headers: dict[str, str] | None = None,
+) -> tuple[int, bytes]:
+    """Blocking HTTP request to the loopback-pinned MLX server.
+
+    Returns ``(status_code, body_bytes)``. Async callers MUST run this via
+    ``asyncio.to_thread`` so it never blocks the event loop. The base URL host
+    is the import-time-pinned loopback IP (``_MLX_LOOPBACK_IP``) and the scheme
+    is a fixed ``http://``, so this is not an SSRF / ``file://`` vector.
+    """
+    import urllib.request
+
+    method = "POST" if data is not None else "GET"
+    req = urllib.request.Request(  # nosec B310 — loopback-pinned base URL
+        f"{_mlx_base_url()}{path}",
+        data=data,
+        headers=headers or {},
+        method=method,
+    )
+    # Host is the pinned loopback IP from _mlx_base_url(); fixed http:// scheme.
+    # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+        return resp.status, resp.read()
 
 
 async def _generate_via_mlx_server(
@@ -707,9 +753,8 @@ async def _generate_via_mlx_server(
     Returns:
         Path to the generated WAV file, or None if server unavailable.
     """
+    import asyncio
     import json
-    import urllib.request
-    import urllib.error
 
     if not _MLX_HOST_IS_LOOPBACK:
         logger.warning(
@@ -718,20 +763,15 @@ async def _generate_via_mlx_server(
             MLX_SERVER_HOST,
         )
         return None
-    base_url = f"http://{MLX_SERVER_HOST}:{MLX_SERVER_PORT}"
 
-    # Check if server is reachable
+    # Check if server is reachable. Blocking I/O runs in a worker thread so it
+    # never blocks the async event loop.
     try:
-        req = urllib.request.Request(  # nosec B310 — loopback only
-            f"{base_url}/api/models", method="GET"
-        )
-        # base_url host is enforced loopback (guard above) + fixed http:// scheme.
-        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-        with urllib.request.urlopen(req, timeout=2) as resp:  # nosec B310
-            if resp.status != 200:
-                return None
-    except (urllib.error.URLError, TimeoutError, OSError):
-        logger.debug("MLX server not reachable at %s", base_url)
+        status_code, _ = await asyncio.to_thread(_mlx_request, "/api/models", 2.0)
+        if status_code != 200:
+            return None
+    except (TimeoutError, OSError):
+        logger.debug("MLX server not reachable at %s", _mlx_base_url())
         return None
 
     # Submit generation request
@@ -748,17 +788,15 @@ async def _generate_via_mlx_server(
             body[key] = kwargs[key]
 
     try:
-        data = json.dumps(body).encode("utf-8")
-        req = urllib.request.Request(  # nosec B310
-            f"{base_url}/api/generate",
-            data=data,
+        payload = json.dumps(body).encode("utf-8")
+        _, raw = await asyncio.to_thread(
+            _mlx_request,
+            "/api/generate",
+            10.0,
+            data=payload,
             headers={"Content-Type": "application/json"},
-            method="POST",
         )
-        # base_url host is enforced loopback (guard above) + fixed http:// scheme.
-        # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-        with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310
-            result = json.loads(resp.read())
+        result = json.loads(raw)
         job_id = result["id"]
         logger.info("MLX generation submitted: job %s", job_id)
     except Exception as exc:
@@ -766,30 +804,21 @@ async def _generate_via_mlx_server(
         return None
 
     # Poll for completion (up to 10 minutes)
-    import asyncio
-
     max_polls = 1200  # 10 minutes at 500ms intervals
     for _ in range(max_polls):
         await asyncio.sleep(0.5)
         try:
-            req = urllib.request.Request(  # nosec B310
-                f"{base_url}/api/status/{job_id}", method="GET"
+            _, raw = await asyncio.to_thread(
+                _mlx_request, f"/api/status/{job_id}", 5.0
             )
-            # base_url host is enforced loopback (guard above) + fixed http:// scheme.
-            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-            with urllib.request.urlopen(req, timeout=5) as resp:  # nosec B310
-                status = json.loads(resp.read())
+            status = json.loads(raw)
 
             if status["status"] == "done":
-                # Download the WAV
-                req = urllib.request.Request(  # nosec B310
-                    f"{base_url}/api/audio/{job_id}", method="GET"
+                # Download the WAV (network + file write both off the event loop).
+                _, audio = await asyncio.to_thread(
+                    _mlx_request, f"/api/audio/{job_id}", 30.0
                 )
-                # base_url host is enforced loopback (guard above) + fixed http:// scheme.
-                # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-                with urllib.request.urlopen(req, timeout=30) as resp:  # nosec B310
-                    with open(output_path, "wb") as f:
-                        f.write(resp.read())
+                await asyncio.to_thread(output_path.write_bytes, audio)
                 logger.info("MLX audio saved to %s", output_path)
                 return str(output_path)
 
@@ -1196,22 +1225,14 @@ def format_music_result(result: dict) -> str:
 
 def get_capabilities() -> dict[str, bool]:
     """Get available music generation capabilities."""
-    # Check if MLX server is reachable
+    # Check if MLX server is reachable (loopback-pinned; sync caller, no thread).
     mlx_available = False
-    try:
-        import urllib.request
-
-        if _MLX_HOST_IS_LOOPBACK:
-            base_url = f"http://{MLX_SERVER_HOST}:{MLX_SERVER_PORT}"
-            req = urllib.request.Request(  # nosec B310 — loopback only
-                f"{base_url}/api/models", method="GET"
-            )
-            # base_url host is enforced loopback (guard above) + fixed http:// scheme.
-            # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-            with urllib.request.urlopen(req, timeout=1) as resp:  # nosec B310
-                mlx_available = resp.status == 200
-    except Exception:
-        pass
+    if _MLX_HOST_IS_LOOPBACK:
+        try:
+            status_code, _ = _mlx_request("/api/models", 1.0)
+            mlx_available = status_code == 200
+        except Exception:
+            pass
 
     return {
         "midi": MIDI_AVAILABLE,

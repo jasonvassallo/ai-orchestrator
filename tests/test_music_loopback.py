@@ -52,3 +52,51 @@ class TestIsLoopbackHost:
     def test_default_host_constant_is_loopback(self) -> None:
         # Default MLX_SERVER_HOST is 127.0.0.1, resolved once at import.
         assert music._MLX_HOST_IS_LOOPBACK is True
+
+
+class TestResolveLoopbackIp:
+    """The pinned-IP resolver (closes the DNS-rebinding window)."""
+
+    def test_literal_ip_returned_as_is(self) -> None:
+        assert music._resolve_loopback_ip("127.0.0.1") == "127.0.0.1"
+        assert music._resolve_loopback_ip("127.0.0.9") == "127.0.0.9"
+        assert music._resolve_loopback_ip("::1") == "::1"
+
+    def test_localhost_pins_to_127_without_dns(self) -> None:
+        assert music._resolve_loopback_ip("localhost") == "127.0.0.1"
+        assert music._resolve_loopback_ip("  LOCALHOST ") == "127.0.0.1"
+
+    def test_non_loopback_returns_none(self) -> None:
+        assert music._resolve_loopback_ip("8.8.8.8") is None
+        assert music._resolve_loopback_ip("192.168.1.1") is None
+
+    def test_hostname_pins_resolved_loopback_ip(self) -> None:
+        infos = [(music.socket.AF_INET, 0, 0, "", ("127.0.0.7", 0))]
+        with mock.patch.object(music.socket, "getaddrinfo", return_value=infos):
+            assert music._resolve_loopback_ip("alias.example") == "127.0.0.7"
+
+    def test_hostname_with_any_public_ip_returns_none(self) -> None:
+        # Mixed resolution (rebinding-prone) is rejected entirely.
+        infos = [
+            (music.socket.AF_INET, 0, 0, "", ("127.0.0.1", 0)),
+            (music.socket.AF_INET, 0, 0, "", ("8.8.8.8", 0)),
+        ]
+        with mock.patch.object(music.socket, "getaddrinfo", return_value=infos):
+            assert music._resolve_loopback_ip("rebind.example") is None
+
+    def test_resolution_failure_returns_none(self) -> None:
+        with mock.patch.object(
+            music.socket, "getaddrinfo", side_effect=music.socket.gaierror
+        ):
+            assert music._resolve_loopback_ip("nope.invalid") is None
+
+
+class TestMlxBaseUrl:
+    """base_url is built from the pinned IP, with IPv6 bracketing."""
+
+    def test_default_is_pinned_ipv4(self) -> None:
+        assert music._mlx_base_url() == f"http://127.0.0.1:{music.MLX_SERVER_PORT}"
+
+    def test_ipv6_is_bracketed(self, monkeypatch) -> None:
+        monkeypatch.setattr(music, "_MLX_LOOPBACK_IP", "::1")
+        assert music._mlx_base_url() == f"http://[::1]:{music.MLX_SERVER_PORT}"
