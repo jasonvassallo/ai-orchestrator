@@ -656,6 +656,11 @@ def _is_loopback_host(host: str) -> bool:
     normalized = host.strip().lower()
     if normalized in {"127.0.0.1", "localhost", "::1"}:
         return True
+    # If it's already an IP literal, decide without a DNS syscall.
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        pass  # not a bare IP — resolve the hostname below
     try:
         infos = socket.getaddrinfo(normalized, None)
     except (socket.gaierror, UnicodeError, ValueError):
@@ -674,6 +679,9 @@ def _is_loopback_host(host: str) -> bool:
 
 # Resolved once at import (MLX_SERVER_HOST is a module-level env constant) so the
 # request paths never call the blocking getaddrinfo() inside the async event loop.
+# Because this is fixed at import, tests exercise other hosts by calling
+# _is_loopback_host() directly (and mocking socket.getaddrinfo), not by setting
+# MLX_SERVER_HOST afterwards.
 _MLX_HOST_IS_LOOPBACK: bool = _is_loopback_host(MLX_SERVER_HOST)
 
 

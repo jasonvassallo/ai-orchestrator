@@ -723,6 +723,9 @@ async def run() -> None:
 asyncio.run(run())
 `;
 
+// Show the "workspace pythonExecutable ignored" notice at most once per session.
+let warnedWorkspacePythonOverride = false;
+
 class MlxProvider {
     constructor() {
         this.name = 'mlx';
@@ -743,11 +746,16 @@ class MlxProvider {
             .trim();
         // Surface (don't honor) a workspace/folder-scoped override so the user
         // isn't confused when their repo-level setting is intentionally ignored.
+        // Use a visible toast, but only once per session to avoid spamming on
+        // every generation.
         if (inspectedPython
-            && (inspectedPython.workspaceValue || inspectedPython.workspaceFolderValue)) {
-            console.warn(
-                '[ai-orchestrator] Ignoring workspace-scoped "pythonExecutable" for '
-                + 'security; set it in your User (global) settings to take effect.'
+            && (inspectedPython.workspaceValue || inspectedPython.workspaceFolderValue)
+            && !warnedWorkspacePythonOverride) {
+            warnedWorkspacePythonOverride = true;
+            vscode.window.showWarningMessage(
+                'ai-orchestrator: a workspace-scoped "pythonExecutable" setting is '
+                + 'ignored for security. Set it in your User (global) settings to '
+                + 'take effect.'
             );
         }
 
