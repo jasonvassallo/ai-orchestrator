@@ -441,9 +441,7 @@ class SettingsDialog(QDialog):
         self.agent_skills_enabled.setChecked(True)
         core_layout.addRow(self.agent_skills_enabled)
 
-        self.agent_browser_enabled = QCheckBox(
-            "Enable browser automation (dangerous)"
-        )
+        self.agent_browser_enabled = QCheckBox("Enable browser automation (dangerous)")
         core_layout.addRow(self.agent_browser_enabled)
 
         layout.addWidget(core_group)
@@ -508,9 +506,7 @@ class SettingsDialog(QDialog):
         self.agent_max_tool_output_chars = QSpinBox()
         self.agent_max_tool_output_chars.setRange(500, 1000000)
         self.agent_max_tool_output_chars.setValue(10000)
-        limits_layout.addRow(
-            "Max Tool Output Chars:", self.agent_max_tool_output_chars
-        )
+        limits_layout.addRow("Max Tool Output Chars:", self.agent_max_tool_output_chars)
 
         self.agent_max_shell_output_chars = QSpinBox()
         self.agent_max_shell_output_chars.setRange(200, 1000000)
@@ -539,9 +535,7 @@ class SettingsDialog(QDialog):
         self.agent_max_history_messages = QSpinBox()
         self.agent_max_history_messages.setRange(1, 500)
         self.agent_max_history_messages.setValue(24)
-        limits_layout.addRow(
-            "Max History Messages:", self.agent_max_history_messages
-        )
+        limits_layout.addRow("Max History Messages:", self.agent_max_history_messages)
 
         layout.addWidget(limits_group)
         layout.addStretch()
@@ -594,7 +588,9 @@ class SettingsDialog(QDialog):
 
             self.agent_web_tools.setChecked(bool(agent_cfg.get("enableWebTools", True)))
             self.agent_mcp_enabled.setChecked(bool(agent_cfg.get("enableMcp", True)))
-            self.agent_skills_enabled.setChecked(bool(agent_cfg.get("enableSkills", True)))
+            self.agent_skills_enabled.setChecked(
+                bool(agent_cfg.get("enableSkills", True))
+            )
             self.agent_browser_enabled.setChecked(
                 bool(agent_cfg.get("enableBrowserAutomation", False))
             )
@@ -650,9 +646,7 @@ class SettingsDialog(QDialog):
                 self.agent_max_fetched_chars.setValue(
                     int(limits.get("maxFetchedChars", 12000))
                 )
-                self.agent_max_web_results.setValue(
-                    int(limits.get("maxWebResults", 8))
-                )
+                self.agent_max_web_results.setValue(int(limits.get("maxWebResults", 8)))
                 self.agent_max_memory_context_chars.setValue(
                     int(limits.get("maxMemoryContextChars", 9000))
                 )

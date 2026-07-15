@@ -20,7 +20,9 @@ from .runner import AgentRunner, AgentRunOptions
 async def _async_main() -> int:
     parser = argparse.ArgumentParser(description="AI Orchestrator Agent CLI")
     parser.add_argument("prompt", nargs="?", help="Prompt to send to the local agent")
-    parser.add_argument("--model", "-m", help="Model override (default: local agent model)")
+    parser.add_argument(
+        "--model", "-m", help="Model override (default: local agent model)"
+    )
     parser.add_argument(
         "--session",
         default="default",
@@ -28,8 +30,14 @@ async def _async_main() -> int:
     )
     parser.add_argument("--max-tokens", type=int, default=2048)
     parser.add_argument("--temperature", type=float, default=0.2)
-    parser.add_argument("--incognito", action="store_true", help="Disable conversation persistence")
-    parser.add_argument("--browser-automation", action="store_true", help="Enable dangerous browser automation tool")
+    parser.add_argument(
+        "--incognito", action="store_true", help="Disable conversation persistence"
+    )
+    parser.add_argument(
+        "--browser-automation",
+        action="store_true",
+        help="Enable dangerous browser automation tool",
+    )
     parser.add_argument("--disable-web-tools", action="store_true")
     parser.add_argument("--disable-mcp", action="store_true")
     parser.add_argument("--disable-skills", action="store_true")
@@ -72,7 +80,9 @@ async def _async_main() -> int:
 
     with console.status("[cyan]Running agent...", spinner="dots") as status:
         status_handle = status
-        response = await runner.run(args.prompt, options=options, status_callback=on_status)
+        response = await runner.run(
+            args.prompt, options=options, status_callback=on_status
+        )
 
     if response.success:
         console.print(

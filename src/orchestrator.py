@@ -2227,10 +2227,12 @@ class MLXProvider(BaseProvider):
                     return type(argument)
                 raise
 
-        video_auto.video_processor_class_from_name = _safe_video_processor_class_from_name
-        cast(Any, ProcessorMixin).check_argument_for_proper_class = (
-            _safe_check_argument_for_proper_class
+        video_auto.video_processor_class_from_name = (
+            _safe_video_processor_class_from_name
         )
+        cast(
+            Any, ProcessorMixin
+        ).check_argument_for_proper_class = _safe_check_argument_for_proper_class
         cast(Any, video_auto)._ai_orchestrator_video_patch_applied = True
         logger.info(
             "Applied transformers video processor compatibility patch for MLX vision loading."
@@ -2256,9 +2258,7 @@ class MLXProvider(BaseProvider):
             return
 
         clamped_progress = (
-            None
-            if progress is None
-            else max(0.0, min(1.0, float(progress)))
+            None if progress is None else max(0.0, min(1.0, float(progress)))
         )
         status = AgentStatus(
             stage=StatusStage.DOWNLOADING,
@@ -2288,9 +2288,7 @@ class MLXProvider(BaseProvider):
             dry_run_result if isinstance(dry_run_result, list) else []
         )
         files_to_download = [
-            info
-            for info in dry_run_files
-            if getattr(info, "will_download", False)
+            info for info in dry_run_files if getattr(info, "will_download", False)
         ]
         total_files = len(files_to_download)
         total_bytes = sum(
@@ -2318,9 +2316,7 @@ class MLXProvider(BaseProvider):
                 continue
 
             file_path = PurePosixPath(filename_raw)
-            subfolder = (
-                None if str(file_path.parent) == "." else str(file_path.parent)
-            )
+            subfolder = None if str(file_path.parent) == "." else str(file_path.parent)
             revision = getattr(file_info, "commit_hash", None)
             if not isinstance(revision, str) or not revision:
                 revision = None
@@ -3916,7 +3912,11 @@ class ModelRegistry:
                 "local",
                 "private",
             ),
-            best_for=("image analysis", "detailed captioning", "multimodal local tasks"),
+            best_for=(
+                "image analysis",
+                "detailed captioning",
+                "multimodal local tasks",
+            ),
             max_output_tokens=2048,
             supports_vision=True,
             supports_streaming=True,
@@ -5830,9 +5830,7 @@ class AIOrchestrator:
         task_types = TaskClassifier.classify(prompt)
         task_set = {task for task, _ in task_types}
         web_search_enabled = (
-            self.enable_web_search
-            if enable_web_search is None
-            else enable_web_search
+            self.enable_web_search if enable_web_search is None else enable_web_search
         )
         request_web_search = bool(
             web_search_enabled
