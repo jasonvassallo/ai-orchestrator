@@ -163,7 +163,11 @@ async def register_builtin_tools(
             "truncated": truncated,
             "content": truncated_content,
         }
-        return ToolResult("fs_read", json.dumps(payload, ensure_ascii=False, indent=2), truncated=truncated)
+        return ToolResult(
+            "fs_read",
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            truncated=truncated,
+        )
 
     async def fs_write_tool(arguments: dict[str, Any]) -> ToolResult:
         path_raw = _coerce_str(arguments.get("path"))
@@ -210,7 +214,9 @@ async def register_builtin_tools(
             )
         return ToolResult(
             "fs_list",
-            json.dumps({"path": str(path), "entries": entries}, ensure_ascii=False, indent=2),
+            json.dumps(
+                {"path": str(path), "entries": entries}, ensure_ascii=False, indent=2
+            ),
         )
 
     async def shell_tool(arguments: dict[str, Any]) -> ToolResult:
@@ -218,7 +224,11 @@ async def register_builtin_tools(
         if not command:
             return ToolResult("shell", "", False, "Missing required argument: command")
         timeout_s = min(
-            float(_coerce_int(arguments.get("timeout"), int(limits.shell_timeout_seconds), 1, 600)),
+            float(
+                _coerce_int(
+                    arguments.get("timeout"), int(limits.shell_timeout_seconds), 1, 600
+                )
+            ),
             limits.shell_timeout_seconds,
         )
 
@@ -228,7 +238,9 @@ async def register_builtin_tools(
             stderr=asyncio.subprocess.PIPE,
         )
         try:
-            stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
+            stdout, stderr = await asyncio.wait_for(
+                process.communicate(), timeout=timeout_s
+            )
         except asyncio.TimeoutError:
             process.kill()
             await process.wait()
@@ -305,11 +317,15 @@ async def register_builtin_tools(
         query = _coerce_str(arguments.get("query"))
         limit = _coerce_int(arguments.get("limit"), 5, 1, 25)
         if not query:
-            return ToolResult("memory_search", "", False, "Missing required argument: query")
+            return ToolResult(
+                "memory_search", "", False, "Missing required argument: query"
+            )
         matches = memory_store.search(query, limit=limit)
         return ToolResult(
             "memory_search",
-            json.dumps({"query": query, "matches": matches}, ensure_ascii=False, indent=2),
+            json.dumps(
+                {"query": query, "matches": matches}, ensure_ascii=False, indent=2
+            ),
         )
 
     async def skills_list_tool(arguments: dict[str, Any]) -> ToolResult:
@@ -329,7 +345,9 @@ async def register_builtin_tools(
             max(limits.max_tool_output_chars, 200),
         )
         if not name:
-            return ToolResult("skills_open", "", False, "Missing required argument: name")
+            return ToolResult(
+                "skills_open", "", False, "Missing required argument: name"
+            )
         skill = find_skill_by_name(skills, name)
         if not skill:
             return ToolResult("skills_open", "", False, f"Skill not found: {name}")
@@ -488,7 +506,9 @@ async def register_builtin_tools(
         async def web_search_tool(arguments: dict[str, Any]) -> ToolResult:
             query = _coerce_str(arguments.get("query"))
             if not query:
-                return ToolResult("web_search", "", False, "Missing required argument: query")
+                return ToolResult(
+                    "web_search", "", False, "Missing required argument: query"
+                )
 
             num_results = _coerce_int(
                 arguments.get("num_results"),
@@ -512,7 +532,9 @@ async def register_builtin_tools(
             response.raise_for_status()
             payload = response.json()
             if not isinstance(payload, dict):
-                return ToolResult("web_search", "", False, "Unexpected search response format.")
+                return ToolResult(
+                    "web_search", "", False, "Unexpected search response format."
+                )
 
             raw_results = payload.get("results", [])
             if not isinstance(raw_results, list):
@@ -554,13 +576,19 @@ async def register_builtin_tools(
         async def web_fetch_tool(arguments: dict[str, Any]) -> ToolResult:
             url = _coerce_str(arguments.get("url"))
             if not url:
-                return ToolResult("web_fetch", "", False, "Missing required argument: url")
+                return ToolResult(
+                    "web_fetch", "", False, "Missing required argument: url"
+                )
             if not _is_http_url(url):
                 return ToolResult("web_fetch", "", False, f"Invalid URL: {url}")
 
             timeout = httpx.Timeout(limits.web_fetch_timeout_seconds)
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                response = await client.get(url, headers={"user-agent": config.user_agent})
+            async with httpx.AsyncClient(
+                timeout=timeout, follow_redirects=True
+            ) as client:
+                response = await client.get(
+                    url, headers={"user-agent": config.user_agent}
+                )
             response.raise_for_status()
             content_type = response.headers.get("content-type", "")
             body = response.text
@@ -617,17 +645,30 @@ async def register_builtin_tools(
 
     if enable_browser_automation:
         playwright_script = (
-            config.codex_home / "skills" / "playwright" / "scripts" / "playwright_cli.sh"
+            config.codex_home
+            / "skills"
+            / "playwright"
+            / "scripts"
+            / "playwright_cli.sh"
         )
-        playwright_command = str(playwright_script) if playwright_script.exists() else "playwright-cli"
+        playwright_command = (
+            str(playwright_script) if playwright_script.exists() else "playwright-cli"
+        )
 
         async def browser_tool(arguments: dict[str, Any]) -> ToolResult:
             action = _coerce_str(arguments.get("action"))
             if not action:
-                return ToolResult("browser_action", "", False, "Missing required argument: action")
+                return ToolResult(
+                    "browser_action", "", False, "Missing required argument: action"
+                )
             args = arguments.get("args", [])
             if not isinstance(args, list):
-                return ToolResult("browser_action", "", False, "Field 'args' must be a list of strings.")
+                return ToolResult(
+                    "browser_action",
+                    "",
+                    False,
+                    "Field 'args' must be a list of strings.",
+                )
             str_args: list[str] = [str(item) for item in args]
 
             process = await asyncio.create_subprocess_exec(
@@ -645,7 +686,9 @@ async def register_builtin_tools(
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
-                return ToolResult("browser_action", "", False, "Browser command timed out.")
+                return ToolResult(
+                    "browser_action", "", False, "Browser command timed out."
+                )
 
             stdout_text = stdout.decode("utf-8", errors="replace")
             stderr_text = stderr.decode("utf-8", errors="replace")
@@ -696,7 +739,9 @@ async def register_mcp_tools(
     warnings: list[str] = []
     for server in mcp_servers:
         try:
-            tools = await list_server_tools(server, timeout_seconds=limits.tool_timeout_seconds)
+            tools = await list_server_tools(
+                server, timeout_seconds=limits.tool_timeout_seconds
+            )
         except Exception as exc:  # noqa: BLE001
             warning = (
                 f"Failed to list tools for MCP server '{server.name}' "
@@ -745,7 +790,9 @@ async def register_mcp_tools(
                         error=str(exc),
                     )
 
-                trimmed, truncated = truncate_text(content, limits.max_tool_output_chars)
+                trimmed, truncated = truncate_text(
+                    content, limits.max_tool_output_chars
+                )
                 return ToolResult(
                     tool_name=local_tool_name,
                     content=trimmed,
@@ -772,5 +819,7 @@ async def register_mcp_tools(
 
 
 def _sanitize_segment(value: str) -> str:
-    clean = "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in value)
+    clean = "".join(
+        char if char.isalnum() or char in {"-", "_"} else "_" for char in value
+    )
     return clean.strip("_-") or "tool"

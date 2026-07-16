@@ -51,7 +51,9 @@ def _as_str(value: Any, default: str) -> str:
 
 def _as_str_list(value: Any, default: list[str]) -> list[str]:
     if isinstance(value, list):
-        cleaned = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+        cleaned = [
+            item.strip() for item in value if isinstance(item, str) and item.strip()
+        ]
         if cleaned:
             return cleaned
     return list(default)
@@ -159,7 +161,9 @@ def build_agent_config(user_config: dict[str, Any]) -> AgentConfig:
     agent_config = cast(dict[str, Any], agent_raw)
 
     env_codex_home = os.environ.get("CODEX_HOME")
-    codex_home_default = Path(env_codex_home).expanduser() if env_codex_home else Path.home() / ".codex"
+    codex_home_default = (
+        Path(env_codex_home).expanduser() if env_codex_home else Path.home() / ".codex"
+    )
     claude_home_default = Path.home() / ".claude"
     gemini_home_default = Path.home() / ".gemini"
     memory_default = CONFIG_DIR / "agent_memory.md"
@@ -192,14 +196,18 @@ def build_agent_config(user_config: dict[str, Any]) -> AgentConfig:
         web_fetch_timeout_seconds=_as_float(
             profile_values.get("webFetchTimeoutSeconds"), 25.0, minimum=1.0
         ),
-        max_prompt_chars=_as_int(profile_values.get("maxPromptChars"), 24000, minimum=2000),
+        max_prompt_chars=_as_int(
+            profile_values.get("maxPromptChars"), 24000, minimum=2000
+        ),
         max_tool_output_chars=_as_int(
             profile_values.get("maxToolOutputChars"), 10000, minimum=500
         ),
         max_shell_output_chars=_as_int(
             profile_values.get("maxShellOutputChars"), 8000, minimum=200
         ),
-        max_fetched_chars=_as_int(profile_values.get("maxFetchedChars"), 12000, minimum=500),
+        max_fetched_chars=_as_int(
+            profile_values.get("maxFetchedChars"), 12000, minimum=500
+        ),
         max_web_results=_as_int(profile_values.get("maxWebResults"), 8, minimum=1),
         max_memory_context_chars=_as_int(
             profile_values.get("maxMemoryContextChars"), 9000, minimum=500

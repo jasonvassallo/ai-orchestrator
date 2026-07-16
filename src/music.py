@@ -736,7 +736,7 @@ def _mlx_request(
     import urllib.request
 
     method = "POST" if data is not None else "GET"
-    req = urllib.request.Request(  # nosec B310 — loopback-pinned base URL
+    req = urllib.request.Request(  # nosec B310 — loopback-pinned base URL  # noqa: S310
         f"{_mlx_base_url()}{path}",
         data=data,
         headers=headers or {},
@@ -744,7 +744,7 @@ def _mlx_request(
     )
     # Host is the pinned loopback IP from _mlx_base_url(); fixed http:// scheme.
     # nosemgrep: python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # nosec B310  # noqa: S310
         return resp.status, resp.read()
 
 
@@ -800,9 +800,17 @@ async def _generate_via_mlx_server(
         "seconds": float(min(duration, 300)),
     }
     # Pass through optional params
-    for key in ("temperature", "top_k", "guidance_coef", "steps",
-                "cfg_scale", "seed", "melody_path", "style_audio_path",
-                "style_coef"):
+    for key in (
+        "temperature",
+        "top_k",
+        "guidance_coef",
+        "steps",
+        "cfg_scale",
+        "seed",
+        "melody_path",
+        "style_audio_path",
+        "style_coef",
+    ):
         if key in kwargs and kwargs[key] is not None:
             body[key] = kwargs[key]
 
@@ -827,9 +835,7 @@ async def _generate_via_mlx_server(
     for _ in range(max_polls):
         await asyncio.sleep(0.5)
         try:
-            _, raw = await asyncio.to_thread(
-                _mlx_request, f"/api/status/{job_id}", 5.0
-            )
+            _, raw = await asyncio.to_thread(_mlx_request, f"/api/status/{job_id}", 5.0)
             status = json.loads(raw)
 
             if status["status"] == "done":
@@ -876,9 +882,7 @@ async def generate_audio_with_musicgen(
         "deep_house": "deep house, soulful, smooth",
         "minimal": "minimal techno, hypnotic, stripped back",
     }
-    prompt_parts.append(
-        genre_descriptions.get(params.genre, "electronic dance music")
-    )
+    prompt_parts.append(genre_descriptions.get(params.genre, "electronic dance music"))
     prompt = ", ".join(prompt_parts)
 
     output_path = get_output_dir() / f"{filename_base}_audio.wav"

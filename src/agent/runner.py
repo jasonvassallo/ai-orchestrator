@@ -49,7 +49,9 @@ class AgentRunOptions:
 class AgentRunner:
     """Codex-like tool-using agent loop over the existing AIOrchestrator."""
 
-    def __init__(self, orchestrator: AIOrchestrator, workspace: Path | None = None) -> None:
+    def __init__(
+        self, orchestrator: AIOrchestrator, workspace: Path | None = None
+    ) -> None:
         self.orchestrator = orchestrator
         self.workspace = (workspace or Path.cwd()).resolve()
         user_config = getattr(orchestrator, "_user_config", {})
@@ -84,9 +86,13 @@ class AgentRunner:
 
     def _should_auto_remember(self, prompt: str) -> bool:
         lowered = prompt.lower()
-        return any(pattern.lower() in lowered for pattern in self.config.auto_remember_patterns)
+        return any(
+            pattern.lower() in lowered for pattern in self.config.auto_remember_patterns
+        )
 
-    def _format_transcript(self, transcript: list[dict[str, str]], max_chars: int) -> str:
+    def _format_transcript(
+        self, transcript: list[dict[str, str]], max_chars: int
+    ) -> str:
         lines: list[str] = []
         for item in transcript:
             role = item.get("role", "unknown")
@@ -133,7 +139,9 @@ class AgentRunner:
         memory_block, _ = truncate_text(memory_block, limits.max_memory_context_chars)
 
         skill_block = skill_context.strip() or "(no selected skills)"
-        skill_block, _ = truncate_text(skill_block, max(2000, limits.max_prompt_chars // 3))
+        skill_block, _ = truncate_text(
+            skill_block, max(2000, limits.max_prompt_chars // 3)
+        )
 
         static_prefix = (
             f"{instruction_block}\n\n"
@@ -211,7 +219,9 @@ class AgentRunner:
             if options.enable_web_tools is None
             else options.enable_web_tools
         )
-        use_mcp = self.config.enable_mcp if options.enable_mcp is None else options.enable_mcp
+        use_mcp = (
+            self.config.enable_mcp if options.enable_mcp is None else options.enable_mcp
+        )
         use_skills = (
             self.config.enable_skills
             if options.enable_skills is None
@@ -231,15 +241,24 @@ class AgentRunner:
 
         skills = await self._discover_skills_if_needed(use_skills)
         selected_skills = select_skills_for_prompt(prompt, skills, max_auto=4)
-        skill_context = render_skill_context(selected_skills, max_chars=max(2000, limits.max_prompt_chars // 3))
+        skill_context = render_skill_context(
+            selected_skills, max_chars=max(2000, limits.max_prompt_chars // 3)
+        )
 
         memory_context = self.memory_store.read(limits.max_memory_context_chars)
 
-        history = [] if options.incognito else self.conversation_store.load_recent(
-            options.session_id,
-            limits.max_history_messages,
+        history = (
+            []
+            if options.incognito
+            else self.conversation_store.load_recent(
+                options.session_id,
+                limits.max_history_messages,
+            )
         )
-        transcript: list[dict[str, str]] = [*history, {"role": "user", "content": prompt}]
+        transcript: list[dict[str, str]] = [
+            *history,
+            {"role": "user", "content": prompt},
+        ]
 
         registry = ToolRegistry()
         await register_builtin_tools(
@@ -337,7 +356,9 @@ class AgentRunner:
                     final_content = response.content
                     break
 
-                transcript.append({"role": "assistant", "content": response_without_attr})
+                transcript.append(
+                    {"role": "assistant", "content": response_without_attr}
+                )
 
                 for tool_call in tool_calls:
                     await self._emit_status(
@@ -346,7 +367,9 @@ class AgentRunner:
                         f"Running tool: {tool_call.name}",
                         model=model_key,
                     )
-                    result = await registry.execute(tool_call, limits.tool_timeout_seconds)
+                    result = await registry.execute(
+                        tool_call, limits.tool_timeout_seconds
+                    )
                     if tool_call.name == "memory_write" and result.success:
                         memory_write_called = True
 
@@ -401,8 +424,7 @@ class AgentRunner:
             if mcp_warnings:
                 warnings_block = "\n".join(f"- {item}" for item in mcp_warnings)
                 final_content = (
-                    f"{final_content}\n\n---\n"
-                    f"*[MCP Warnings]*\n{warnings_block}"
+                    f"{final_content}\n\n---\n*[MCP Warnings]*\n{warnings_block}"
                 )
 
             latency_ms = (
@@ -436,7 +458,8 @@ class AgentRunner:
                     "input_tokens": model_usage_input,
                     "output_tokens": model_usage_output,
                 },
-                latency_ms=(datetime.now(timezone.utc) - model_start).total_seconds() * 1000,
+                latency_ms=(datetime.now(timezone.utc) - model_start).total_seconds()
+                * 1000,
                 success=False,
                 error=(
                     "Agent model step timed out. Increase "

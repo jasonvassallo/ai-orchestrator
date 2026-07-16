@@ -90,7 +90,9 @@ def bootstrap(config: BootstrapConfig) -> int:
     elif state is not None:
         result = _run_command(["docker", "start", config.container_name])
         if result.returncode != 0:
-            print(f"Failed to start container '{config.container_name}': {result.stderr}")
+            print(
+                f"Failed to start container '{config.container_name}': {result.stderr}"
+            )
             return 1
         print(f"Started existing container '{config.container_name}'.")
     else:
@@ -113,7 +115,9 @@ def bootstrap(config: BootstrapConfig) -> int:
             ]
         )
         if run_result.returncode != 0:
-            print(f"Failed to create container '{config.container_name}': {run_result.stderr}")
+            print(
+                f"Failed to create container '{config.container_name}': {run_result.stderr}"
+            )
             return 1
         print(
             f"Created container '{config.container_name}' using image '{config.image}'."

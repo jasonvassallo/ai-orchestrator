@@ -7,7 +7,9 @@ def test_strip_attribution() -> None:
 
 
 def test_parse_tool_calls_from_object() -> None:
-    payload = '{"tool_calls":[{"id":"a","name":"web_search","arguments":{"query":"python"}}]}'
+    payload = (
+        '{"tool_calls":[{"id":"a","name":"web_search","arguments":{"query":"python"}}]}'
+    )
     calls = parse_tool_calls(payload)
     assert len(calls) == 1
     assert calls[0].name == "web_search"
@@ -16,9 +18,7 @@ def test_parse_tool_calls_from_object() -> None:
 
 def test_parse_tool_calls_from_fenced_json() -> None:
     payload = (
-        "```json\n"
-        '[{"name":"memory_write","arguments":{"note":"Remember this"}}]\n'
-        "```"
+        '```json\n[{"name":"memory_write","arguments":{"note":"Remember this"}}]\n```'
     )
     calls = parse_tool_calls(payload)
     assert len(calls) == 1

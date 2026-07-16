@@ -68,8 +68,10 @@ def _parse_mcp_server_entry(
     env_raw = payload.get("env", {})
     cwd_raw = payload.get("cwd")
 
-    if isinstance(server_type, str) and server_type.lower() == "http" and isinstance(
-        url, str
+    if (
+        isinstance(server_type, str)
+        and server_type.lower() == "http"
+        and isinstance(url, str)
     ):
         return MCPServerConfig(
             name=normalized_name,
@@ -168,7 +170,9 @@ def _extract_mcp_server_maps(payload: Any) -> list[dict[str, Any]]:
     return maps
 
 
-def _collect_claude_mcp_servers(claude_home: Path, workspace: Path) -> list[MCPServerConfig]:
+def _collect_claude_mcp_servers(
+    claude_home: Path, workspace: Path
+) -> list[MCPServerConfig]:
     discovered: list[MCPServerConfig] = []
 
     claude_global = _read_json(claude_home.parent / ".claude.json")
@@ -213,9 +217,7 @@ def _collect_claude_mcp_servers(claude_home: Path, workspace: Path) -> list[MCPS
                             if parsed:
                                 discovered.append(parsed)
 
-    installed_plugins = _read_json(
-        claude_home / "plugins" / "installed_plugins.json"
-    )
+    installed_plugins = _read_json(claude_home / "plugins" / "installed_plugins.json")
     if installed_plugins and isinstance(installed_plugins.get("plugins"), dict):
         plugins = cast(dict[str, Any], installed_plugins["plugins"])
         for plugin_entries in plugins.values():
@@ -250,9 +252,7 @@ def _collect_claude_mcp_servers(claude_home: Path, workspace: Path) -> list[MCPS
                 if extension_manifest and isinstance(
                     extension_manifest.get("mcpServers"), dict
                 ):
-                    mcp_servers = cast(
-                        dict[str, Any], extension_manifest["mcpServers"]
-                    )
+                    mcp_servers = cast(dict[str, Any], extension_manifest["mcpServers"])
                     for server_name, server_payload in mcp_servers.items():
                         if not isinstance(server_name, str) or not isinstance(
                             server_payload, dict
@@ -366,7 +366,9 @@ class MCPHttpClient:
                 events.append(cast(dict[str, Any], payload))
         return events
 
-    async def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def request(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         if not self.server.url:
             raise RuntimeError("MCP HTTP server missing URL.")
 
@@ -442,7 +444,9 @@ class MCPStdioClient:
             raise RuntimeError("Invalid MCP stdio frame: payload is not an object.")
         return cast(dict[str, Any], parsed)
 
-    async def request(self, method: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def request(
+        self, method: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         if not self.server.command:
             raise RuntimeError("MCP stdio server missing command.")
 

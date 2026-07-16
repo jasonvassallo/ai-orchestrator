@@ -591,11 +591,15 @@ class MainWindow(QMainWindow):
                         temperature=temperature,
                         enable_web_tools=bool(settings.get("web_search"))
                         and bool(self._runtime_settings.get("agent_web_tools", True)),
-                        enable_mcp=bool(self._runtime_settings.get("agent_mcp_enabled", True)),
+                        enable_mcp=bool(
+                            self._runtime_settings.get("agent_mcp_enabled", True)
+                        ),
                         enable_skills=bool(
                             self._runtime_settings.get("agent_skills_enabled", True)
                         ),
-                        enable_browser_automation=bool(settings.get("browser_automation"))
+                        enable_browser_automation=bool(
+                            settings.get("browser_automation")
+                        )
                         and bool(
                             self._runtime_settings.get("agent_browser_enabled", False)
                         ),

@@ -32,14 +32,18 @@ url = "https://learn.microsoft.com/api/mcp"
                 "projects": {
                     str(workspace): {
                         "mcpServers": {
-                            "huggingface": {"httpUrl": "https://huggingface.co/mcp?login"}
+                            "huggingface": {
+                                "httpUrl": "https://huggingface.co/mcp?login"
+                            }
                         }
                     }
                 }
             }
         ),
     )
-    plugin_install = claude_home / "plugins" / "cache" / "vendor" / "playwright" / "1.0.0"
+    plugin_install = (
+        claude_home / "plugins" / "cache" / "vendor" / "playwright" / "1.0.0"
+    )
     _write(
         claude_home / "plugins" / "installed_plugins.json",
         json.dumps(
