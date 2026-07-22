@@ -20,12 +20,15 @@ jobs:
   review:
     # Run on PR open, OR a comment on a PR that explicitly mentions @gemini-cli
     # (mention-gated so it doesn't fire on every comment or loop on its own).
+    # The trailing AND skips auto-review on PRs labeled 'trivial' (fleet opt-out
+    # tier); an explicit @gemini-cli comment still works on labeled PRs.
     if: >
-      (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false) ||
-      (github.event_name == 'issue_comment' &&
-       github.event.issue.pull_request != null &&
-       contains(github.event.comment.body, '@gemini-cli') &&
-       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+      (((github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == false) ||
+        (github.event_name == 'issue_comment' &&
+         github.event.issue.pull_request != null &&
+         contains(github.event.comment.body, '@gemini-cli') &&
+         contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))) &&
+       (github.event_name != 'pull_request' || !contains(github.event.pull_request.labels.*.name, 'trivial')))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
