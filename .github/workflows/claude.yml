@@ -1,5 +1,43 @@
 name: Claude Code
 
+# Fleet template (fleet/templates/claude.yml in review-pipeline).
+#
+# @claude MENTION assistant ONLY -- this workflow does NOT auto-review PRs.
+# Claude review is handled solely by claude-code-review.yml (the
+# `claude-review` check), so Claude reviews each PR exactly once.
+# It responds only when someone writes "@claude" in a new or assigned issue,
+# an issue or PR conversation comment, or an inline PR review comment (not in
+# the summary text of a submitted PR review: that event is not subscribed).
+#
+# ANSWERS ONLY, NO PUSHES (2026-10-27, fleet/claude-wf-hardening). The model
+# reads text other people write (issue bodies, PR descriptions, diffs), so a
+# cleverly worded issue could steer it ("prompt injection"). It therefore gets
+# a token that can comment but cannot change code: `contents: read`. @claude
+# can read the repo and reply in the thread; it cannot push a commit or a
+# branch. No fleet repo had ever used an @claude push (checked 2026-10-27). To
+# have Claude change code, run Claude Code locally and open a PR as usual.
+#
+# Where the token lives, and why each line below is there:
+#  - actions/checkout leaves no token in .git/config (persist-credentials: false).
+#  - The action is handed this job's own token (github_token) instead of
+#    minting a Claude GitHub App token, so the token Claude's tools hold is
+#    exactly the read-only-for-code token above. Replies are posted as
+#    github-actions[bot]. No id-token: write is needed.
+#  - claude-code-action fetches the PR branch BEFORE it sets up its own git
+#    auth, which fails on a private repo without credentials. A credential
+#    helper passed ONLY through this step's environment (GIT_CONFIG_*) answers
+#    that fetch from the token the action already holds ($OVERRIDE_GITHUB_TOKEN,
+#    set by the pinned action from `github_token`). Nothing is written to disk.
+#  - The action itself then puts the token into origin's URL in .git/config
+#    (its design, not ours). So the model is also DENIED reading .git/config,
+#    /proc (the process environment holds the token too), the runner's
+#    step-output files and credential files, and denied editing anything under
+#    .git/ (a git hook would run with the token). The repo's own
+#    .claude/settings.json and .mcp.json are not loaded (--setting-sources user,
+#    --strict-mcp-config), so a PR cannot loosen these rules.
+#
+# Requires the CLAUDE_CODE_OAUTH_TOKEN repo secret.
+
 on:
   issue_comment:
     types: [created]
@@ -10,29 +48,27 @@ on:
 
 jobs:
   claude:
-    # Only trusted actors (OWNER/MEMBER/COLLABORATOR) can invoke @claude, so external
-    # commenters on this public repo can't spend quota or steer a write-capable bot.
-    # PR review comments additionally require the PR head to live in this repo
-    # (fork guard — that payload carries head-repo, so the check is declarative);
-    # the issue_comment path resolves the same guard via the API in the first
-    # step below, since its payload has no PR-head-repo field
-    # (reference: jasonvassallo/dotfiles claude.yml).
+    # Only trusted actors (OWNER/MEMBER/COLLABORATOR) can invoke @claude, so an
+    # untrusted account can never start this credential-bearing job. PR review
+    # comments additionally require the PR head to live in this repo — that
+    # payload carries head-repo, so the fork guard is declarative there; the
+    # issue_comment path resolves the same guard via the API in the first step
+    # below (reference: jasonvassallo/dotfiles claude.yml).
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) && github.event.pull_request.head.repo.full_name == github.repository) ||
       (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      id-token: write
-      actions: read # Required for Claude to read CI results on PRs
+      contents: read         # answers only: @claude cannot push (see the header)
+      pull-requests: write   # reply on a PR
+      issues: write          # reply on an issue
+      actions: read          # read CI results on PRs
     steps:
       # issue_comment payloads carry no PR-head-repo field, so the fork guard
       # is resolved via the API instead. Runs BEFORE checkout so a fork PR's
-      # content is never fetched while this job's token is on disk; failing
-      # the job is fail-closed.
+      # content is never fetched; failing the job is fail-closed.
       - name: Fail closed on fork PRs
         if: ${{ github.event.issue.pull_request }}
         env:
@@ -48,23 +84,27 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          persist-credentials: false   # no token in .git/config from the checkout
           fetch-depth: 1
 
       - name: Run Claude Code
-        id: claude
-        uses: anthropics/claude-code-action@e90deca47693f9457b72f2b53c17d7c445a87342 # v1
+        # v1.0.248 (2026-10-09). Older pins (v1.0.176 and before) left the
+        # checkout's credential usable: their cleanup missed the include file
+        # that actions/checkout v4.3.1+ writes it to.
+        uses: anthropics/claude-code-action@1d6de8cb0c237e7c15e9e1bdf973826ebae490cc # v1.0.248
+        # No token here: only static git settings. The helper reads the token
+        # the action already holds, and only when git asks for a credential.
+        env:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: credential.https://github.com.helper
+          GIT_CONFIG_VALUE_0: '!f() { test "$1" = get && echo username=x-access-token && echo "password=$OVERRIDE_GITHUB_TOKEN"; }; f'
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
-          # This is an optional setting that allows Claude to read CI results on PRs
+          github_token: ${{ github.token }}
           additional_permissions: |
             actions: read
-
-          # Optional: Give a custom prompt to Claude. If this is not specified, Claude will perform the instructions specified in the comment that tagged it.
-          # prompt: 'Update the pull request description to include a summary of changes.'
-
-          # Optional: Add claude_args to customize behavior and configuration
-          # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
-          # or https://code.claude.com/docs/en/cli-reference for available options
-          # claude_args: '--allowed-tools Bash(gh pr:*)'
-
+          claude_args: |
+            --setting-sources user
+            --strict-mcp-config
+            --disallowedTools "Read(.git/config),Read(**/.git/config),Edit(.git/**),Edit(**/.git/**),Write(.git/**),Write(**/.git/**)"
+            --disallowedTools "Read(//proc/**),Read(//sys/**),Read(//dev/**),Read(/${{ runner.temp }}/_runner_file_commands/**),Read(//**/.credentials*),Read(~/.ssh/**),Read(~/.docker/**),Read(~/.config/gh/**),Read(~/.git-credentials),Read(~/.netrc)"
