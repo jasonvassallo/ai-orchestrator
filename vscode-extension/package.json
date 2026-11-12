@@ -253,9 +253,5 @@
       "supported": true
     },
     "virtualWorkspaces": true
-  },
-  "volta": {
-    "node": "24.12.0",
-    "npm": "11.6.2"
   }
 }
